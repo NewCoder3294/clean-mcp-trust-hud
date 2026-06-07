@@ -5,6 +5,7 @@ from __future__ import annotations
 import os
 import subprocess
 
+from ..mcp.shared import resolve_local_project_id
 from ..util.hashing import hash_file_content
 from ..util.logging import get_logger
 from .base import FileScore, Indicator, IndicatorResult, Offender, ScoringContext
@@ -33,8 +34,15 @@ def _git_toplevel(path: str) -> str | None:
 
 
 def _project_id_for(root: str) -> str:
-    """Mirror CodebaseIndexer._project_id so lookups hit the indexed table."""
-    return os.path.basename(os.path.abspath(root)).lower().replace(" ", "_")
+    """Resolve the indexed project ID for *root*.
+
+    Delegates to the shared :func:`resolve_local_project_id` so scoring looks up
+    the exact ID that ``index_repo`` stored — git ``owner/repo`` + branch for a
+    GitHub-backed checkout, or ``local/<folder>`` otherwise. Previously this used
+    only the folder basename, which silently missed every git-backed index and
+    rendered the HUD as "NO INDEX".
+    """
+    return resolve_local_project_id(root)
 
 
 def _band(score: int) -> str:

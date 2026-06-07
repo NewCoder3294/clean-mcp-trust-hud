@@ -164,3 +164,84 @@ def _make_project_id(repo: str, branch: str | None = None) -> str:
         safe_branch = branch.replace("/", "_").lower()
         return f"{base}--{safe_branch}"
     return base
+
+
+# ---------------------------------------------------------------------------
+# Local git / project-id detection
+# ---------------------------------------------------------------------------
+
+
+def _detect_git_repo(cwd: str) -> str | None:
+    """Return 'owner/repo' by parsing the git origin remote URL, or None."""
+    import re
+    import subprocess
+
+    try:
+        result = subprocess.run(
+            ["git", "-C", cwd, "remote", "get-url", "origin"],
+            capture_output=True,
+            text=True,
+            timeout=5,
+        )
+        if result.returncode == 0:
+            url = result.stdout.strip()
+            # handles both https://github.com/owner/repo.git and git@github.com:owner/repo.git
+            m = re.search(r"[:/]([a-zA-Z0-9._-]+/[a-zA-Z0-9._-]+?)(?:\.git)?$", url)
+            if m:
+                return m.group(1)
+    except Exception:
+        pass
+    return None
+
+
+def _detect_git_branch(cwd: str) -> str | None:
+    """Return the current git branch name for the repo at *cwd*, or None."""
+    import subprocess
+
+    try:
+        result = subprocess.run(
+            ["git", "-C", cwd, "rev-parse", "--abbrev-ref", "HEAD"],
+            capture_output=True,
+            text=True,
+            timeout=5,
+        )
+        if result.returncode == 0:
+            branch = result.stdout.strip()
+            # "HEAD" means detached — not useful
+            return branch if branch and branch != "HEAD" else None
+    except Exception:
+        pass
+    return None
+
+
+def resolve_local_project_id(path: str, branch: str | None = None) -> str:
+    """Derive the project ID for a local folder exactly as ``index_repo`` does.
+
+    This is the single source of truth shared by the local-path indexer
+    (``_handle_index_local_path``) and the Trust-HUD scoring layer, so the two
+    can never drift: a folder indexed under one ID must be looked up under the
+    same ID.
+
+    Resolution mirrors the indexer:
+
+    1. If *path* is a git repo with a GitHub ``origin`` remote, use
+       ``owner/repo``.
+    2. Otherwise use the sanitized folder basename, prefixed ``local/`` to
+       avoid clashes with real GitHub repos.
+
+    The branch (passed in or detected from the working tree) is folded into the
+    ID via :func:`_make_project_id`.
+    """
+    import os
+    import re
+
+    abs_path = os.path.abspath(os.path.expanduser(path))
+
+    repo_full_name = _detect_git_repo(abs_path)
+    if not repo_full_name:
+        folder = os.path.basename(abs_path.rstrip(os.sep)) or "root"
+        folder = re.sub(r"[^a-zA-Z0-9._-]", "-", folder).lower() or "local"
+        repo_full_name = f"local/{folder}"
+
+    branch = (branch or "").strip() or _detect_git_branch(abs_path) or None
+    return _make_project_id(repo_full_name, branch)

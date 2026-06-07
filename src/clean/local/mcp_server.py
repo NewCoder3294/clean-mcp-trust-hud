@@ -23,6 +23,8 @@ from ..formatting.tiered import format_tiered_results
 from ..indexing.indexer import detect_repo_metadata
 from ..indexing.staleness import check_staleness
 from ..mcp.shared import (
+    _detect_git_branch,
+    _detect_git_repo,
     _make_project_id,
     _relativize_context,
     _relativize_results,
@@ -42,49 +44,6 @@ logger = get_logger(__name__)
 DEFAULT_INDEX_TIMEOUT = 1800.0
 STALE_INDEXING_SECONDS = 300.0
 _BACKGROUND_INDEX_TASKS: set[asyncio.Task] = set()
-
-
-def _detect_git_branch(cwd: str) -> str | None:
-    """Return the current git branch name for the repo at *cwd*, or None."""
-    import subprocess
-
-    try:
-        result = subprocess.run(
-            ["git", "-C", cwd, "rev-parse", "--abbrev-ref", "HEAD"],
-            capture_output=True,
-            text=True,
-            timeout=5,
-        )
-        if result.returncode == 0:
-            branch = result.stdout.strip()
-            # "HEAD" means detached — not useful
-            return branch if branch and branch != "HEAD" else None
-    except Exception:
-        pass
-    return None
-
-
-def _detect_git_repo(cwd: str) -> str | None:
-    """Return 'owner/repo' by parsing the git origin remote URL, or None."""
-    import re
-    import subprocess
-
-    try:
-        result = subprocess.run(
-            ["git", "-C", cwd, "remote", "get-url", "origin"],
-            capture_output=True,
-            text=True,
-            timeout=5,
-        )
-        if result.returncode == 0:
-            url = result.stdout.strip()
-            # handles both https://github.com/owner/repo.git and git@github.com:owner/repo.git
-            m = re.search(r"[:/]([a-zA-Z0-9._-]+/[a-zA-Z0-9._-]+?)(?:\.git)?$", url)
-            if m:
-                return m.group(1)
-    except Exception:
-        pass
-    return None
 
 
 # --- Server factory ---

@@ -28,6 +28,7 @@ import subprocess
 import sys
 from typing import NamedTuple
 
+from ..mcp.shared import resolve_local_project_id
 from .state import ScoringStateWriter
 
 _RESET = "\033[0m"
@@ -74,7 +75,7 @@ _REPO_RE = re.compile(r"[:/]([A-Za-z0-9._-]+/[A-Za-z0-9._-]+?)(?:\.git)?$")
 class GitContext(NamedTuple):
     repo: str | None  # "owner/repo"
     branch: str | None
-    project_id: str | None  # matches CodebaseIndexer._project_id(root)
+    project_id: str | None  # matches index_repo via resolve_local_project_id(root)
 
 
 def _color(score: int) -> str:
@@ -130,7 +131,11 @@ def git_context(cwd: str) -> GitContext:
         repo = m.group(1) if m else None
     if repo is None:
         repo = os.path.basename(root)
-    project_id = os.path.basename(root).lower().replace(" ", "_")
+    # Resolve the project_id the same way index_repo / the scoring service do,
+    # so the mismatch check below compares like with like. Using the bare
+    # basename here silently failed to match git-backed indexes and showed
+    # "no recent score for this repo" even when a fresh score existed.
+    project_id = resolve_local_project_id(root)
     return GitContext(repo, branch, project_id)
 
 
