@@ -51,6 +51,10 @@ def _should_skip(name: str, include_hidden: bool) -> bool:
     return False
 
 
+# Public alias — other modules (e.g. the explorer tree model) reuse this.
+should_skip_dir = _should_skip
+
+
 def build_file_tree(
     repo_dir: str,
     depth: int = 4,
