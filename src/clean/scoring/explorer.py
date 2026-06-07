@@ -202,6 +202,44 @@ def render(
     return "\n".join([head, ""] + rows_out + [footer])
 
 
+def _tmux_send_keys(target: str, path: str, line: int) -> list[str]:
+    """tmux argv that opens *path* at *line* in the vim running in pane *target*.
+
+    Sends Escape (ensure normal mode), then ``:edit +<line> <path><CR>``. Spaces
+    in the path are backslash-escaped for vim's command line.
+    """
+    # TODO(v2): only spaces are escaped; paths containing %, #, |, or \ are not
+    # safe for vim's :edit command line.
+    vim_path = path.replace(" ", r"\ ")
+    return [
+        "tmux",
+        "send-keys",
+        "-t",
+        target,
+        "Escape",
+        f":edit +{line} {vim_path}",
+        "Enter",
+    ]
+
+
+def _open_in_pane(target: str, path: str, line: int) -> None:
+    """Open *path* at *line* in the editor running in tmux pane *target*, then
+    focus that pane. Used by ``clean-tree --sidebar``; does not touch our TTY."""
+    try:
+        subprocess.run(_tmux_send_keys(target, path, line), check=False)
+        result = subprocess.run(
+            ["tmux", "select-pane", "-t", target],
+            check=False,
+            capture_output=True,
+        )
+        if result.returncode != 0:
+            sys.stderr.write(
+                f"tmux select-pane failed: {result.stderr.decode().strip()}\n"
+            )
+    except OSError as e:
+        sys.stderr.write(f"tmux error: {e}\n")
+
+
 def _open_in_editor(path: str, line: int, fd, old_termios) -> None:
     """Suspend the TUI, run $EDITOR/vim at *line*, then restore raw mode."""
     import termios
@@ -254,10 +292,14 @@ def main() -> None:
         )
         return
 
-    _interactive_loop(state, repo_root, git, color)
+    # Sidebar mode: opening a file targets the editor in another tmux pane.
+    sidebar_target = (
+        os.environ.get("CLEAN_TREE_TARGET") if "--sidebar" in sys.argv[1:] else None
+    )
+    _interactive_loop(state, repo_root, git, color, sidebar_target)
 
 
-def _interactive_loop(state, repo_root, git, color) -> None:
+def _interactive_loop(state, repo_root, git, color, sidebar_target=None) -> None:
     import select
     import termios
     import tty
@@ -297,7 +339,10 @@ def _interactive_loop(state, repo_root, git, color) -> None:
                 node = current(state)
                 if node and not node.is_dir:
                     line = _first_flagged_line(state.score_cache.get(node.path))
-                    _open_in_editor(node.path, line, fd, old)
+                    if sidebar_target:
+                        _open_in_pane(sidebar_target, node.path, line)
+                    else:
+                        _open_in_editor(node.path, line, fd, old)
     except KeyboardInterrupt:
         pass
     finally:

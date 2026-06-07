@@ -1,5 +1,6 @@
 """Tests for the explorer's pure render helpers."""
 
+from clean.scoring import explorer
 from clean.scoring import treeview
 from clean.scoring.explorer import (
     _first_flagged_line,
@@ -159,3 +160,47 @@ def test_preview_strips_read_source_gutter(tmp_path):
     assert "|" not in body  # read_source's "N |" gutter stripped, not doubled
     assert "x = 1" in body and "y = 2" in body
     assert body.count("x = 1") == 1  # code not duplicated
+
+
+def test_tmux_send_keys_builds_open_command():
+    cmd = explorer._tmux_send_keys("%3", "/repo/src/a.py", 12)
+    assert cmd == [
+        "tmux",
+        "send-keys",
+        "-t",
+        "%3",
+        "Escape",
+        ":edit +12 /repo/src/a.py",
+        "Enter",
+    ]
+
+
+def test_tmux_send_keys_escapes_spaces_for_vim():
+    cmd = explorer._tmux_send_keys("%3", "/repo/a b.py", 1)
+    assert cmd[-2] == r":edit +1 /repo/a\ b.py"
+
+
+def test_open_in_pane_invokes_tmux(monkeypatch):
+    calls = []
+
+    class _R:
+        returncode = 0
+        stderr = b""
+
+    def fake_run(*a, **k):
+        calls.append(a[0])
+        return _R()
+
+    monkeypatch.setattr(explorer.subprocess, "run", fake_run)
+    explorer._open_in_pane("%5", "/repo/a.py", 7)
+    assert calls[0][:4] == ["tmux", "send-keys", "-t", "%5"]
+    assert calls[1] == ["tmux", "select-pane", "-t", "%5"]
+
+
+def test_open_in_pane_swallows_oserror(monkeypatch, capsys):
+    def boom(*a, **k):
+        raise OSError("no tmux")
+
+    monkeypatch.setattr(explorer.subprocess, "run", boom)
+    explorer._open_in_pane("%5", "/repo/a.py", 7)  # must not raise
+    assert "tmux error" in capsys.readouterr().err
