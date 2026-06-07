@@ -1,4 +1,4 @@
-.PHONY: install test lint format clean
+.PHONY: install test lint format clean ide tree
 
 VENV := .venv
 
@@ -33,6 +33,16 @@ lint:
 format:
 	$(PYTHON) -m ruff format src/ tests/
 	$(PYTHON) -m ruff check --fix src/ tests/
+
+## ide — Kill stray tmux sessions, then launch the docked clean-ide sidebar.
+##        Run this in a real terminal window (it takes over the screen via tmux).
+ide:
+	-tmux kill-server 2>/dev/null || true
+	$(VENV_BIN)/clean-ide
+
+## tree — Launch the full-screen clean-tree explorer (run in a real terminal).
+tree:
+	$(VENV_BIN)/clean-tree
 
 ## clean — Remove venv and caches
 clean:
