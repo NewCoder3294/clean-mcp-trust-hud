@@ -37,6 +37,10 @@ already computes (the call graph, embeddings, and incremental/staleness state).
 | `hook.py` | `clean-score` entry point: PostToolUse hook + `serve` subcommand. |
 | `statusline.py` | `clean-statusline` entry point: three-panel btop-style HUD (system row: model · context meter · task / git row / clean-mcp row) + `legend`. |
 | `dashboard.py` | `clean-hud` entry point: full-screen TUI for a split pane (`--once` for one frame). |
+| `treeview.py` | Lazy structured file-tree model (Node + build/expand/collapse/flatten/parent_index) for the `clean-tree` explorer. Reuses the file-tree skip-dir set. |
+| `highlight.py` | Dependency-free per-line syntax highlighter (Python/JS/TS) for the explorer preview. |
+| `navigate.py` | Pure key reducer (`reduce(state, key) -> (state, action)`) for the explorer; no terminal I/O. |
+| `explorer.py` | `clean-tree` entry point: trust-colored file-tree sidebar + syntax-highlighted, Trust-HUD-flagged preview; opens files in `$EDITOR`/vim at the first flagged line. |
 | `indicators/` | One file per indicator; `__init__.py` imports them so they self-register. |
 
 ## The indicators
@@ -88,6 +92,7 @@ Nothing else changes.
 - Config lives in `ScoringConfig` (`../core/config.py`), env-overridable via
   `CLEAN_SCORING_*` (`ENABLED`, `INDICATORS`, `STATE_PATH`, `DUP_THRESHOLD`,
   `DRIFT_THRESHOLD`, `BLAST_WARN`).
+- `clean-tree` is the terminal file explorer (see `explorer.py`): trust-colored tree sidebar, syntax-highlighted preview with Trust-HUD flags, and open-in-`$EDITOR`/vim at the first flagged line. Run it with `clean-tree`.
 - Terminal HUD (add to your Claude Code `settings.json`):
   ```json
   { "hooks": { "PostToolUse": [ { "matcher": "Edit|Write|MultiEdit",

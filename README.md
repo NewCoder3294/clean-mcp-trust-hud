@@ -213,6 +213,18 @@ tmux split-window -h 'clean-hud'     # dashboard on the right
 ```
 
 
+### File explorer (`clean-tree`)
+
+Browse your project's files with trust scores shown inline. Each entry is
+coloured by its Trust-HUD score, the right-hand pane shows a syntax-highlighted
+preview with Trust-HUD flags, and pressing Enter opens the file in `$EDITOR`
+(falling back to vim) at the first flagged line:
+
+```bash
+clean-tree           # interactive explorer
+clean-tree --once    # render a single frame and exit
+```
+
 Optionally run `clean-score serve` to keep the embedding model warm (the hook
 falls back to the fast, no-model indicators if it isn't running). You can also
 call the `score_file` / `score_change` MCP tools directly. Configure via
