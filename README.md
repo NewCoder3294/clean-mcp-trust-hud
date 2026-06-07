@@ -189,9 +189,29 @@ Wire it into Claude Code's `settings.json`:
   "statusLine": { "type": "command", "command": "clean-statusline" } }
 ```
 
-The statusline shows the current repo + branch and a two-line, colored,
-charted HUD (circle gauge + per-metric bars). Run `clean-statusline legend` for
-a plain-English explanation of every metric.
+The statusline shows two layers: row 1 is the git control (repo + branch),
+row 2 is clean-mcp (a colored, charted HUD — circle gauge + per-metric bars).
+Run `clean-statusline legend` for a plain-English explanation of every metric.
+
+### Full-screen dashboard (`clean-hud`)
+
+For more room than the statusline strip, run the dashboard in a split terminal
+pane beside your editor:
+
+```bash
+clean-hud            # live, full-screen, refreshes every 1s (Ctrl-C to quit)
+clean-hud --once     # render a single frame and exit
+```
+
+It draws the overall TRUST gauge, a wide bar per metric **with its plain-English
+meaning inline**, and a **Flagged** section listing the exact symbols that lost
+points (e.g. hallucinated calls). A typical split-pane workflow:
+
+```bash
+tmux split-window -h 'clean-hud'     # dashboard on the right
+# …drive Claude Code on the left; every edit updates the dashboard
+```
+
 
 Optionally run `clean-score serve` to keep the embedding model warm (the hook
 falls back to the fast, no-model indicators if it isn't running). You can also

@@ -64,8 +64,9 @@ _MEANING = {
 _DISPLAY_ORDER = ["grounding", "blast_radius", "orphan", "alignment", "duplication"]
 
 _CIRCLES = "○◔◑◕●"
-_METRIC_SEP = "    "
-_GROUP_SEP = "      "
+_METRIC_SEP = " · "  # between metric chunks on the clean-mcp row
+_GROUP_SEP = "   "  # between repo and branch on the git row
+_DIVIDER = " │ "  # between the TRUST headline and the metric details
 
 _REPO_RE = re.compile(r"[:/]([A-Za-z0-9._-]+/[A-Za-z0-9._-]+?)(?:\.git)?$")
 
@@ -224,7 +225,8 @@ def render(
         else:
             overall = _overall_chunk(state, color)
             metrics = _metrics_line(state, color)
-            clean_row = overall + (f"{_GROUP_SEP}{metrics}" if metrics else "")
+            divider = _paint(_DIVIDER, _DIM, color)
+            clean_row = overall + (f"{divider}{metrics}" if metrics else "")
 
     rows = [r for r in (git_row, clean_row) if r]
     return "\n".join(rows)

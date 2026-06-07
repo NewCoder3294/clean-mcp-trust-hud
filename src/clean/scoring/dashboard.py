@@ -152,21 +152,30 @@ def render_dashboard(
     return "\n".join(lines)
 
 
+def _frame(writer: ScoringStateWriter, color: bool) -> str:
+    state = writer.read()
+    anchor = os.getcwd()
+    if state and state.get("file_path"):
+        anchor = os.path.dirname(state["file_path"]) or anchor
+    git = git_context(anchor)
+    width = shutil.get_terminal_size((100, 30)).columns
+    return render_dashboard(state, git, width=width, color=color)
+
+
 def main() -> None:
     writer = ScoringStateWriter()
     color = os.getenv("NO_COLOR") is None
+
+    # One-shot: render a single frame and exit (handy for testing / screenshots).
+    if "--once" in sys.argv[1:]:
+        print(_frame(writer, color))
+        return
+
     interval = float(os.getenv("CLEAN_HUD_INTERVAL", "1") or "1")
     sys.stdout.write(_HIDE_CURSOR)
     try:
         while True:
-            state = writer.read()
-            anchor = os.getcwd()
-            if state and state.get("file_path"):
-                anchor = os.path.dirname(state["file_path"]) or anchor
-            git = git_context(anchor)
-            width = shutil.get_terminal_size((100, 30)).columns
-            frame = render_dashboard(state, git, width=width, color=color)
-            sys.stdout.write(_CLEAR + frame + "\n")
+            sys.stdout.write(_CLEAR + _frame(writer, color) + "\n")
             sys.stdout.flush()
             time.sleep(interval)
     except KeyboardInterrupt:
