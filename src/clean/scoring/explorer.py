@@ -12,13 +12,13 @@ from __future__ import annotations
 import os
 import re
 import subprocess
-import sys  # noqa: F401  (used by the interactive loop added in Task 5)
+import sys
 
 from ..util.source_reader import SourceReaderError, read_source
-from . import treeview  # noqa: F401  (used by main(), added in Task 5)
+from . import treeview
 from .daemon import request_score
 from .highlight import highlight_line, language_for
-from .navigate import ExplorerState, current, reduce, visible_rows  # noqa: F401
+from .navigate import ExplorerState, current, reduce, visible_rows
 from .statusline import (
     _BOLD,
     _CYAN,
@@ -26,7 +26,7 @@ from .statusline import (
     _WHITE,
     _color,
     _paint,
-    git_context,  # noqa: F401  (used by main(), added in Task 5)
+    git_context,
 )
 
 _CLEAR = "\033[2J\033[H"
@@ -194,3 +194,111 @@ def render(
         "j/k move · l/⏎ open · h close · e vim · r rescore · q quit", _DIM, color
     )
     return "\n".join([head, ""] + rows_out + [footer])
+
+
+def _open_in_editor(path: str, line: int, fd, old_termios) -> None:
+    """Suspend the TUI, run $EDITOR/vim at *line*, then restore raw mode."""
+    import termios
+    import tty
+
+    editor = os.environ.get("EDITOR") or "vim"
+    termios.tcsetattr(fd, termios.TCSADRAIN, old_termios)
+    sys.stdout.write(_SHOW_CURSOR + _CLEAR)
+    sys.stdout.flush()
+    try:
+        subprocess.call([editor, f"+{line}", path])
+    except OSError as e:
+        sys.stderr.write(f"editor error: {e}\n")
+    finally:
+        tty.setcbreak(fd)
+        sys.stdout.write(_HIDE_CURSOR)
+        sys.stdout.flush()
+
+
+def _terminal_size() -> tuple[int, int]:
+    try:
+        sz = os.get_terminal_size()
+        return sz.columns, sz.lines
+    except OSError:
+        return 100, 30
+
+
+def main() -> None:
+    color = os.getenv("NO_COLOR") is None
+    cwd = os.getcwd()
+    repo_root = _repo_root(cwd)
+    git = git_context(repo_root)
+    state = ExplorerState(root=treeview.build_root(repo_root))
+
+    if "--once" in sys.argv[1:] or not sys.stdin.isatty():
+        w, h = _terminal_size()
+        cur = current(state)
+        if cur and not cur.is_dir:
+            _score_for(state, cur.path, repo_root)
+        print(
+            render(
+                state,
+                repo=git.repo,
+                branch=git.branch,
+                repo_root=repo_root,
+                width=w,
+                height=h,
+                color=color,
+            )
+        )
+        return
+
+    _interactive_loop(state, repo_root, git, color)
+
+
+def _interactive_loop(state, repo_root, git, color) -> None:
+    import select
+    import termios
+    import tty
+
+    fd = sys.stdin.fileno()
+    old = termios.tcgetattr(fd)
+    sys.stdout.write(_HIDE_CURSOR)
+    try:
+        tty.setcbreak(fd)
+        while True:
+            cur = current(state)
+            if cur and not cur.is_dir and cur.path not in state.score_cache:
+                _score_for(state, cur.path, repo_root)
+            w, h = _terminal_size()
+            sys.stdout.write(
+                _CLEAR
+                + render(
+                    state,
+                    repo=git.repo,
+                    branch=git.branch,
+                    repo_root=repo_root,
+                    width=w,
+                    height=h,
+                    color=color,
+                )
+                + "\n"
+            )
+            sys.stdout.flush()
+            ready, _, _ = select.select([sys.stdin], [], [], 30)
+            if not ready:
+                continue
+            ch = os.read(fd, 3).decode("utf-8", "ignore")
+            state, action = reduce(state, ch)
+            if action == "quit":
+                break
+            if action == "open":
+                node = current(state)
+                if node and not node.is_dir:
+                    line = _first_flagged_line(state.score_cache.get(node.path))
+                    _open_in_editor(node.path, line, fd, old)
+    except KeyboardInterrupt:
+        pass
+    finally:
+        termios.tcsetattr(fd, termios.TCSADRAIN, old)
+        sys.stdout.write(_SHOW_CURSOR + "\n")
+        sys.stdout.flush()
+
+
+if __name__ == "__main__":
+    main()
