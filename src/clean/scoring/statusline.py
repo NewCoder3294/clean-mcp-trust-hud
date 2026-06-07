@@ -3,8 +3,11 @@
 Renders a two-line, charted, color-coded Trust-HUD for the Claude Code
 statusline from ~/.clean/scoring.json:
 
-    repo cleanmcp/clean-mcp   branch feat/trust-hud   TRUST ◕ ███████████░░░ 82/100 OK
-       Real calls ████████░░  80    Impact ██████████ 100    Used ████░░░░░░  40
+    repo cleanmcp/clean-mcp      branch feat/trust-hud
+    TRUST ◕ ███████████░░░ 82/100 OK   Real calls ████████░░ 80  Impact █████ 100
+
+Two layers: row 1 is the git control (repo + branch); row 2 is clean-mcp
+(overall TRUST gauge + per-metric bars).
 
 - a circle gauge (○◔◑◕●) plus a 14-cell bar for the overall trust score
 - a 10-cell bar chart per metric, bright green/amber/red by health
@@ -179,19 +182,25 @@ def _metrics_line(state: dict, color: bool) -> str:
         )
     if not chunks:
         return ""
-    return "   " + _paint(_METRIC_SEP, _DIM, color).join(chunks)
+    return _paint(_METRIC_SEP, _DIM, color).join(chunks)
 
 
 def render(
     state: dict | None, git: GitContext | None = None, color: bool = True
 ) -> str:
-    """Return the (possibly two-line) statusline string."""
+    """Return the two-layer statusline.
+
+    Row 1 is the git control (repo + branch). Row 2 is the clean-mcp layer
+    (overall TRUST gauge + per-metric bars, or a status message).
+    """
     state = state or {}
     have_git = git is not None and (git.repo or git.branch)
 
-    # Score availability / special cases.
-    score_chunk = ""
-    metrics = ""
+    # --- row 1: git control ---
+    git_row = _git_line(git, color) if have_git else ""
+
+    # --- row 2: clean-mcp ---
+    clean_row = ""
     if state and not state.get("skipped"):
         mismatch = (
             git is not None
@@ -200,22 +209,25 @@ def render(
             and state["project_id"] != git.project_id
         )
         if mismatch:
-            score_chunk = _paint("no recent score for this repo", _DIM, color)
+            clean_row = (
+                _paint("clean", _DIM, color)
+                + "  "
+                + _paint("no recent score for this repo", _DIM, color)
+            )
         elif not state.get("indexed", True):
             repo = (git.repo if git else None) or state.get("project_id") or "this repo"
-            score_chunk = _paint(f"not indexed — run: index {repo}", _DIM, color)
+            clean_row = (
+                _paint("clean", _DIM, color)
+                + "  "
+                + _paint(f"not indexed — run: index {repo}", _DIM, color)
+            )
         else:
-            score_chunk = _overall_chunk(state, color)
+            overall = _overall_chunk(state, color)
             metrics = _metrics_line(state, color)
+            clean_row = overall + (f"{_GROUP_SEP}{metrics}" if metrics else "")
 
-    line1_parts = []
-    if have_git:
-        line1_parts.append(_git_line(git, color))
-    if score_chunk:
-        line1_parts.append(score_chunk)
-    line1 = _GROUP_SEP.join(line1_parts)
-
-    return line1 + ("\n" + metrics if metrics else "")
+    rows = [r for r in (git_row, clean_row) if r]
+    return "\n".join(rows)
 
 
 def legend() -> str:

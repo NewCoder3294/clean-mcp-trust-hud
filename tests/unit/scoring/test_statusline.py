@@ -36,9 +36,21 @@ def test_index_trust_is_not_shown_as_a_bar():
 
 
 def test_render_is_two_lines_with_metrics():
-    line = render(_state(), color=False)
-    assert "\n" in line
+    git = GitContext("o/r", "main", "proj")
+    line = render(_state(project_id="proj"), git=git, color=False)
+    assert "\n" in line  # git row + clean-mcp row
     assert "█" in line  # bar chart present
+
+
+def test_layers_git_on_row1_clean_mcp_on_row2():
+    git = GitContext("cleanmcp/clean-mcp", "feat/trust-hud", "proj")
+    row1, row2 = render(_state(project_id="proj"), git=git, color=False).split("\n")
+    # Row 1 = git control only.
+    assert "cleanmcp/clean-mcp" in row1 and "feat/trust-hud" in row1
+    assert "TRUST" not in row1
+    # Row 2 = clean-mcp layer (overall + metrics).
+    assert "TRUST" in row2
+    assert "Real calls" in row2
 
 
 def test_render_git_context_shows_repo_and_branch():
