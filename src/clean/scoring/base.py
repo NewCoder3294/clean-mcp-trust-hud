@@ -56,6 +56,8 @@ class ScoringContext:
     config: object  # ScoringConfig (avoids a circular import at module load)
     edited_entities: tuple[CodeEntity, ...]
     same_file_names: frozenset[str]
+    imported_names: frozenset[str] = frozenset()  # names the file brings into scope
+    import_wildcard: bool = False  # `from x import *` present -> suppress flagging
     stale: bool = False
     indexed: bool = True  # does the project have an index to resolve against?
     _name_cache: dict[str, list[CodeEntity]] = field(default_factory=dict)

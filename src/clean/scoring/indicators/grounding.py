@@ -64,7 +64,12 @@ class GroundingIndicator(Indicator):
                     or ctx.resolve_method_segment(resolved)
                 )
             else:
-                ok = resolved in local_full or bool(found.get(resolved))
+                ok = (
+                    resolved in local_full
+                    or resolved in ctx.imported_names
+                    or ctx.import_wildcard
+                    or bool(found.get(resolved))
+                )
             if not ok:
                 offenders.append(
                     Offender(display, "no matching definition found", entity.line_start)

@@ -8,6 +8,7 @@ import subprocess
 from ..indexing.staleness import check_staleness
 from ..util.logging import get_logger
 from .base import FileScore, Indicator, IndicatorResult, Offender, ScoringContext
+from .imports import extract_imported_names
 from .registry import IndicatorRegistry
 
 logger = get_logger(__name__)
@@ -126,6 +127,8 @@ class ScoringService:
             indexed = False
         stale = check_staleness(root, self._store, pid) if indexed else True
 
+        imported, wildcard = extract_imported_names(parser.language, source)
+
         ctx = ScoringContext(
             project_id=pid,
             project_root=root,
@@ -135,6 +138,8 @@ class ScoringService:
             config=self._config,
             edited_entities=edited,
             same_file_names=frozenset(e.name for e in edited),
+            imported_names=imported,
+            import_wildcard=wildcard,
             stale=stale,
             indexed=indexed,
         )

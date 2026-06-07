@@ -102,6 +102,8 @@ def make_ctx(
     stale: bool = False,
     embedder=None,
     config: ScoringConfig | None = None,
+    imported: frozenset[str] | set[str] | None = None,
+    import_wildcard: bool = False,
 ) -> ScoringContext:
     store = store if store is not None else FakeStore()
     return ScoringContext(
@@ -113,6 +115,8 @@ def make_ctx(
         config=config or ScoringConfig(),
         edited_entities=tuple(edited),
         same_file_names=frozenset(e.name for e in edited),
+        imported_names=frozenset(imported or ()),
+        import_wildcard=import_wildcard,
         stale=stale,
         indexed=indexed,
     )

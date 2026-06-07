@@ -18,7 +18,8 @@ already computes (the call graph, embeddings, and incremental/staleness state).
 | Indicators: alignment, duplication (embedding-based) | active |
 | Scoring daemon + hook + statusline | active |
 | MCP tools `score_file` / `score_change` | active |
-| Import-aware grounding (resolve imported symbols) | planned (Phase 2) |
+| Import-aware grounding (resolve imported symbols) | active |
+| Storing imports in the index (cross-file import resolution) | planned |
 
 ## Contents
 
@@ -49,12 +50,16 @@ already computes (the call graph, embeddings, and incremental/staleness state).
 
 ### Grounding precision
 
-The parser extracts call-sites but not imports, so grounding only flags a
-reference as hallucinated when it is a **bare, non-builtin identifier** (or an
-unresolved `self.`/`this.` method) that is absent from both the edited file and
-the index. Anything dotted/imported/builtin is treated as acceptable. This
-favors precision (few false positives) over recall; Phase 2 adds import
-extraction to close the recall gap. See `classify.py` and `allowlists.py`.
+Grounding only flags a reference as hallucinated when it is a **bare,
+non-builtin identifier** (or an unresolved `self.`/`this.` method) that is
+absent from the edited file, its **imports**, and the index. Anything
+dotted/imported/builtin is treated as acceptable. Imports are resolved at
+score-time from the edited file's own source (`imports.py`) — so
+`from collections import defaultdict; defaultdict()` and
+`import {useState} from 'react'; useState()` are correctly *not* flagged. This
+favors precision (few false positives). See `classify.py`, `allowlists.py`,
+and `imports.py`. A future step stores imports in the index for cross-file
+import resolution.
 
 ## Adding an indicator
 

@@ -33,6 +33,29 @@ def test_resolved_via_index_scores_full():
     assert result.offenders == ()
 
 
+def test_imported_bare_call_is_not_flagged():
+    # `from collections import defaultdict; defaultdict()` must NOT be a hallucination.
+    target = make_entity("target", calls=("defaultdict",))
+    ctx = make_ctx([target], store=FakeStore([]), imported={"defaultdict"})
+    result = GroundingIndicator().score(target, ctx)
+    assert result.score == 100
+    assert result.offenders == ()
+
+
+def test_wildcard_import_suppresses_flagging():
+    target = make_entity("target", calls=("mystery_name",))
+    ctx = make_ctx([target], store=FakeStore([]), import_wildcard=True)
+    assert GroundingIndicator().score(target, ctx).score == 100
+
+
+def test_non_imported_unknown_call_still_flagged():
+    target = make_entity("target", calls=("frobnicate",))
+    ctx = make_ctx([target], store=FakeStore([]), imported={"defaultdict"})
+    result = GroundingIndicator().score(target, ctx)
+    assert result.score == 0
+    assert {o.name for o in result.offenders} == {"frobnicate"}
+
+
 def test_no_checkable_calls_is_full_score():
     target = make_entity("target", calls=("len", "os.path.join"))
     ctx = make_ctx([target], store=FakeStore([]))
