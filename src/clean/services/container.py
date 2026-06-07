@@ -14,6 +14,7 @@ from ..indexing.indexer import CodebaseIndexer
 from ..parsing.registry import ParserRegistry
 from ..search.context import ContextExpander
 from ..search.searcher import CodeSearcher
+from ..scoring.service import ScoringService
 from ..services.project_manager import ProjectManager
 from ..stats.tracker import StatsTracker
 from ..storage.lancedb import LanceDBStore
@@ -61,6 +62,14 @@ class ServiceContainer:
         # Services
         self.project_manager = ProjectManager(self.store)
         self.stats_tracker = StatsTracker()
+
+        # Scoring (trust-HUD)
+        self.scoring = ScoringService(
+            store=self.store,
+            embedder=self.embedder,
+            parser_registry=self.parser_registry,
+            config=self.config.scoring,
+        )
 
     def warmup(self) -> None:
         """Pre-load heavy resources (embedding model). Call at startup."""

@@ -454,6 +454,63 @@ def create_server(
                 },
             )
         )
+        tools.append(
+            Tool(
+                name="score_file",
+                description=(
+                    "Trust-HUD: score a source file on disk against the indexed "
+                    "codebase. Runs pluggable indicators (grounding/anti-hallucination, "
+                    "blast-radius, orphan-risk, alignment/drift, duplication, "
+                    "index-trust) and returns an overall 0-100 score plus per-indicator "
+                    "scores and the specific flagged symbols.\n\n"
+                    "Use this to check whether just-written code references real symbols "
+                    "and fits the existing codebase."
+                ),
+                inputSchema={
+                    "type": "object",
+                    "properties": {
+                        "path": {
+                            "type": "string",
+                            "description": "Absolute or relative path to the source file to score.",
+                        },
+                        "project_id": {
+                            "type": "string",
+                            "description": "Override the indexed project id. Omit to derive it from the file's git root.",
+                        },
+                    },
+                    "required": ["path"],
+                },
+            )
+        )
+        tools.append(
+            Tool(
+                name="score_change",
+                description=(
+                    "Trust-HUD: score a proposed change before it touches disk. Same "
+                    "indicators as score_file, but you pass the new file contents as a "
+                    "string. Use to vet agent-generated code for hallucinated calls and "
+                    "duplication prior to writing it."
+                ),
+                inputSchema={
+                    "type": "object",
+                    "properties": {
+                        "path": {
+                            "type": "string",
+                            "description": "The path the new contents would be written to (used for language + project resolution).",
+                        },
+                        "source": {
+                            "type": "string",
+                            "description": "The full proposed source code of the file.",
+                        },
+                        "project_id": {
+                            "type": "string",
+                            "description": "Override the indexed project id. Omit to derive it from the path's git root.",
+                        },
+                    },
+                    "required": ["path", "source"],
+                },
+            )
+        )
         return tools
 
     @server.call_tool()
@@ -487,6 +544,10 @@ def create_server(
                 return await _handle_delete_repo(
                     arguments, container, metadata, repo_manager
                 )
+            elif name == "score_file":
+                return _handle_score_file(arguments, container)
+            elif name == "score_change":
+                return _handle_score_change(arguments, container)
             else:
                 return [TextContent(type="text", text=f"Unknown tool: {name}")]
         except asyncio.TimeoutError:
@@ -499,6 +560,47 @@ def create_server(
 
 
 # --- Tool handlers ---
+
+
+def _format_file_score(score) -> str:
+    """Render a FileScore as a compact text report for MCP clients."""
+    if score.skipped:
+        return f"score_file: skipped ({os.path.basename(score.file_path)}) — not scored."
+    lines = [
+        f"Trust score: {score.overall_score}/100 [{score.overall_label}]"
+        + ("  ⚠ index stale" if score.stale else ""),
+        f"  file: {os.path.basename(score.file_path)}  ({score.entity_count} entities)",
+        "",
+    ]
+    for ind in score.indicators:
+        flag = " (skipped)" if ind.skipped else ""
+        lines.append(f"  {ind.label:<10} {ind.score:>3}/100  {ind.summary}{flag}")
+        for off in ind.offenders[:5]:
+            loc = f":{off.line}" if off.line else ""
+            lines.append(f"      - {off.name}{loc} — {off.detail}")
+    return "\n".join(lines)
+
+
+def _handle_score_file(arguments: dict, container) -> list:
+    path = arguments.get("path")
+    if not path:
+        return [TextContent(type="text", text="Error: 'path' is required")]
+    score = container.scoring.score_file(
+        path, project_id=arguments.get("project_id"), with_embeddings=True
+    )
+    return [TextContent(type="text", text=_format_file_score(score))]
+
+
+def _handle_score_change(arguments: dict, container) -> list:
+    path = arguments.get("path")
+    source = arguments.get("source")
+    if not path or source is None:
+        return [TextContent(type="text", text="Error: 'path' and 'source' are required")]
+    score = container.scoring.score_change(
+        path, source.encode("utf-8"),
+        project_id=arguments.get("project_id"), with_embeddings=True,
+    )
+    return [TextContent(type="text", text=_format_file_score(score))]
 
 
 def _bool_argument(arguments: dict, name: str, default: bool) -> bool:

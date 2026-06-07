@@ -99,6 +99,28 @@ class ApiConfig:
 
 
 @dataclass
+class ScoringConfig:
+    """Trust-HUD scoring configuration."""
+
+    enabled: bool = True
+    enabled_indicators: list[str] = field(
+        default_factory=lambda: [
+            "grounding",
+            "blast_radius",
+            "orphan",
+            "alignment",
+            "duplication",
+            "index_trust",
+        ]
+    )
+    weights: dict[str, float] = field(default_factory=dict)
+    dup_threshold: float = 0.92
+    drift_threshold: float = 0.35
+    blast_warn: int = 5
+    state_path: str = ""  # empty -> ~/.clean/scoring.json
+
+
+@dataclass
 class CleanConfig:
     """Top-level configuration container."""
 
@@ -109,6 +131,7 @@ class CleanConfig:
     search: SearchConfig = field(default_factory=SearchConfig)
     toon_formatter: ToonFormatterConfig = field(default_factory=ToonFormatterConfig)
     api: ApiConfig = field(default_factory=ApiConfig)
+    scoring: ScoringConfig = field(default_factory=ScoringConfig)
     debug: bool = False
     verbose: bool = False
 
@@ -169,6 +192,36 @@ class CleanConfig:
             config.api.repos_dir = repos_dir
         if db_path := os.getenv("CLEAN_DB_PATH"):
             config.api.db_path = db_path
+
+        # Scoring (trust-HUD)
+        if enabled := os.getenv("CLEAN_SCORING_ENABLED"):
+            config.scoring.enabled = enabled.lower() in ("true", "1", "yes", "on")
+
+        if indicators := os.getenv("CLEAN_SCORING_INDICATORS"):
+            config.scoring.enabled_indicators = [
+                k.strip() for k in indicators.split(",") if k.strip()
+            ]
+
+        if state_path := os.getenv("CLEAN_SCORING_STATE_PATH"):
+            config.scoring.state_path = state_path
+
+        if dup := os.getenv("CLEAN_SCORING_DUP_THRESHOLD"):
+            try:
+                config.scoring.dup_threshold = float(dup)
+            except ValueError:
+                pass
+
+        if drift := os.getenv("CLEAN_SCORING_DRIFT_THRESHOLD"):
+            try:
+                config.scoring.drift_threshold = float(drift)
+            except ValueError:
+                pass
+
+        if blast := os.getenv("CLEAN_SCORING_BLAST_WARN"):
+            try:
+                config.scoring.blast_warn = int(blast)
+            except ValueError:
+                pass
 
         return config
 

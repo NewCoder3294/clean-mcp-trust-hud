@@ -110,6 +110,8 @@ Or globally via the CLI: `claude mcp add clean -- python -m clean.local.mcp_serv
 | `expand_result` | `rank` | Get full source for a truncated result from the last `search_code` call in the same session. |
 | `delete_repo` | `repo`, optional `branch`, `remove_files` | Remove an index, metadata record, and optionally cloned source files. |
 | `get_token_savings` | optional `reset` | Show or reset TOON-format token savings for the current server session. |
+| `score_file` | `path`, optional `project_id` | Trust-HUD: score a file on disk against the index (grounding/anti-hallucination, blast-radius, orphan-risk, alignment, duplication, index-trust). |
+| `score_change` | `path`, `source`, optional `project_id` | Trust-HUD: score proposed file contents before they touch disk. |
 
 ### Indexing modes
 
@@ -165,6 +167,32 @@ Override the location with env vars:
 | `CLEAN_DB_PATH` | `~/.clean/metadata.db` |
 | `CLEAN_PERSIST_PATH` | `~/.clean/index` |
 | `CLEAN_SHOW_PROGRESS_BAR` | `false` |
+
+## Trust-HUD — score AI-written code in your terminal
+
+Clean can score the code an AI agent writes against *your* indexed codebase and
+show it live in your terminal. Each edit is parsed and run through pluggable
+indicators that produce an overall 0–100 score plus the specific flagged
+symbols:
+
+- **Grounding** — does the new code call symbols that actually exist? (catches hallucinated APIs)
+- **Blast-radius** — how many existing callers does this change affect?
+- **Orphan-risk** — did it add code nothing references?
+- **Alignment** / **Duplication** — does it drift from, or duplicate, existing code? (embedding-based)
+- **Index-trust** — is the index fresh enough to trust the scores?
+
+Wire it into Claude Code's `settings.json`:
+
+```json
+{ "hooks": { "PostToolUse": [ { "matcher": "Edit|Write|MultiEdit",
+      "hooks": [{ "type": "command", "command": "clean-score hook" }] } ] },
+  "statusLine": { "type": "command", "command": "clean-statusline" } }
+```
+
+Optionally run `clean-score serve` to keep the embedding model warm (the hook
+falls back to the fast, no-model indicators if it isn't running). You can also
+call the `score_file` / `score_change` MCP tools directly. Configure via
+`CLEAN_SCORING_*` env vars. See [src/clean/scoring/docs.md](src/clean/scoring/docs.md).
 
 ## Development
 
