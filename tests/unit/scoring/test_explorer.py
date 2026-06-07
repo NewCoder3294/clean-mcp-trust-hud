@@ -180,6 +180,26 @@ def test_tmux_send_keys_escapes_spaces_for_vim():
     assert cmd[-2] == r":edit +1 /repo/a\ b.py"
 
 
+def test_tmux_send_keys_escapes_vim_specials():
+    cmd = explorer._tmux_send_keys("%3", "/repo/a|b%c#d`e.py", 1)
+    assert cmd[-2] == r":edit +1 /repo/a\|b\%c\#d\`e.py"
+
+
+def test_tmux_send_keys_rejects_newline():
+    import pytest
+
+    with pytest.raises(ValueError):
+        explorer._tmux_send_keys("%3", "/repo/evil\nq!.py", 1)
+
+
+def test_open_in_pane_skips_path_with_newline(monkeypatch, capsys):
+    calls = []
+    monkeypatch.setattr(explorer.subprocess, "run", lambda *a, **k: calls.append(a[0]))
+    explorer._open_in_pane("%5", "/repo/evil\nq!.py", 1)
+    assert calls == []  # nothing was ever sent to tmux
+    assert "cannot open file" in capsys.readouterr().err
+
+
 def test_open_in_pane_invokes_tmux(monkeypatch):
     calls = []
 

@@ -206,15 +206,29 @@ def render(
     return "\n".join([head, ""] + rows_out + [footer])
 
 
+# Characters special to vim's ":edit" command line. Escaped so a crafted
+# filename cannot inject ex-commands (|, backtick, %, # …) when sent via tmux.
+_VIM_CMDLINE_SPECIAL = re.compile(r'([\\\t |%#"`$!])')
+
+
+def _vim_escape_path(path: str) -> str:
+    """Backslash-escape *path* for vim's ``:edit`` command line.
+
+    Prevents ex-command injection via crafted filenames. Newlines/carriage
+    returns can't be escaped on the command line, so such paths are rejected.
+    """
+    if "\n" in path or "\r" in path:
+        raise ValueError(f"refusing to open path containing a newline: {path!r}")
+    return _VIM_CMDLINE_SPECIAL.sub(r"\\\1", path)
+
+
 def _tmux_send_keys(target: str, path: str, line: int) -> list[str]:
     """tmux argv that opens *path* at *line* in the vim running in pane *target*.
 
-    Sends Escape (ensure normal mode), then ``:edit +<line> <path><CR>``. Spaces
-    in the path are backslash-escaped for vim's command line.
+    Sends Escape (ensure normal mode), then ``:edit +<line> <path><CR>``. The
+    path is escaped for vim's command line (see :func:`_vim_escape_path`).
     """
-    # TODO(v2): only spaces are escaped; paths containing %, #, |, or \ are not
-    # safe for vim's :edit command line.
-    vim_path = path.replace(" ", r"\ ")
+    vim_path = _vim_escape_path(path)
     return [
         "tmux",
         "send-keys",
@@ -235,7 +249,12 @@ def _open_in_pane(target: str, path: str, line: int) -> None:
     """Open *path* at *line* in the editor running in tmux pane *target*, then
     focus that pane. Used by ``clean-tree --sidebar``; does not touch our TTY."""
     try:
-        subprocess.run(_tmux_send_keys(target, path, line), check=False)
+        keys = _tmux_send_keys(target, path, line)
+    except ValueError as e:
+        sys.stderr.write(f"cannot open file: {e}\n")
+        return
+    try:
+        subprocess.run(keys, check=False)
         result = subprocess.run(
             ["tmux", "select-pane", "-t", target],
             check=False,
