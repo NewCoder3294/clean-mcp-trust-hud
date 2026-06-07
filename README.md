@@ -189,6 +189,10 @@ Wire it into Claude Code's `settings.json`:
   "statusLine": { "type": "command", "command": "clean-statusline" } }
 ```
 
+The statusline shows the current repo + branch and a two-line, colored,
+charted HUD (circle gauge + per-metric bars). Run `clean-statusline legend` for
+a plain-English explanation of every metric.
+
 Optionally run `clean-score serve` to keep the embedding model warm (the hook
 falls back to the fast, no-model indicators if it isn't running). You can also
 call the `score_file` / `score_change` MCP tools directly. Configure via
