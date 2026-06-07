@@ -1,22 +1,27 @@
 """``clean-statusline`` console entry point.
 
-Renders a two-line, charted, color-coded Trust-HUD for the Claude Code
-statusline from ~/.clean/scoring.json:
+Renders a btop-style, three-panel, color-coded HUD for the Claude Code
+statusline. Rows 1-2 come from the Claude Code session payload on stdin; row 3
+comes from ~/.clean/scoring.json:
 
+    Opus 4.8   ctx ▕████████▒▒▒▒▏ 58%   ⏵ Wiring the HUD
     repo cleanmcp/clean-mcp      branch feat/trust-hud
-    TRUST ◕ ███████████░░░ 82/100 OK   Real calls ████████░░ 80  Impact █████ 100
+    TRUST ◕ ███████████░░░ 82/100 OK │ Real calls ████████░░ 80 · Impact █████ 100
 
-Two layers: row 1 is the git control (repo + branch); row 2 is clean-mcp
-(overall TRUST gauge + per-metric bars).
+Three stacked panels (empty rows are dropped):
+  row 1 — system control: model · btop-style context meter · current task
+  row 2 — git control: repo + branch
+  row 3 — clean-mcp: overall TRUST gauge + per-metric bars
 
 - a circle gauge (○◔◑◕●) plus a 14-cell bar for the overall trust score
 - a 10-cell bar chart per metric, bright green/amber/red by health
+- a smooth sub-cell context meter (green→amber→orange→red, 💀 when critical)
 - full, plain-English metric names (run `clean-statusline legend` for meanings)
 - repo + branch derived from the SCORED file (so the label matches the numbers)
 - index freshness shown as a "stale" tag, not its own bar
-- no emojis — plain colored text plus unicode chart glyphs only
 
-Claude Code passes a session JSON object on stdin; we use it for the cwd.
+Claude Code passes a session JSON object on stdin; we read the cwd, model,
+context window, and session id from it.
 """
 
 from __future__ import annotations
@@ -41,6 +46,7 @@ _RED = "\033[91m"
 _CYAN = "\033[96m"
 _BLUE = "\033[94m"
 _WHITE = "\033[97m"
+_ORANGE = "\033[38;5;208m"  # 256-color orange for the context meter's warning band
 
 # Plain-English label + one-line meaning for each indicator.
 _LABELS = {
@@ -68,6 +74,15 @@ _CIRCLES = "○◔◑◕●"
 _METRIC_SEP = " · "  # between metric chunks on the clean-mcp row
 _GROUP_SEP = "   "  # between repo and branch on the git row
 _DIVIDER = " │ "  # between the TRUST headline and the metric details
+
+# System row (row 1): btop-style smooth context meter + model + current task.
+_METER_BLOCKS = "▏▎▍▌▋▊▉█"  # 1..8 eighths, for sub-cell-precise fills
+_METER_L = "▕"  # meter left border
+_METER_R = "▏"  # meter right border
+_METER_TRACK = "▒"  # unfilled portion of the meter
+_SYS_SEP = "   "  # between segments on the system row
+_TASK_GLYPH = "⏵"  # marks the current task
+_AUTO_COMPACT_BUFFER_PCT = 16.5  # Claude Code's default autocompact reserve
 
 _REPO_RE = re.compile(r"[:/]([A-Za-z0-9._-]+/[A-Za-z0-9._-]+?)(?:\.git)?$")
 
@@ -99,6 +114,118 @@ def _use_color() -> bool:
     # Claude Code captures the statusline over a pipe (not a TTY) but DOES render
     # ANSI color — so emit color by default; only honor an explicit NO_COLOR.
     return os.getenv("NO_COLOR") is None
+
+
+# --- system context (row 1: model · context meter · current task) ------------
+
+
+class SystemContext(NamedTuple):
+    model: str | None  # e.g. "Opus 4.8"
+    ctx_used: int | None  # 0-100 percent of *usable* context consumed
+    task: str | None  # the in-progress todo's active form, if any
+
+
+def _ctx_used_pct(cw: dict) -> int | None:
+    """Percent of *usable* context consumed, mirroring the GSD statusline.
+
+    Claude Code reserves a slice of the window for autocompact (≈16.5% by
+    default, overridable via ``CLAUDE_CODE_AUTO_COMPACT_WINDOW`` as a token
+    count). We scale ``remaining_percentage`` to the usable range so the meter
+    reads 100% exactly when autocompact is about to fire.
+    """
+    remaining = cw.get("remaining_percentage")
+    if remaining is None:
+        return None
+    total = cw.get("total_tokens") or 1_000_000
+    try:
+        acw = int(os.getenv("CLAUDE_CODE_AUTO_COMPACT_WINDOW", "0") or 0)
+    except ValueError:
+        acw = 0
+    buffer_pct = min(100.0, acw / total * 100) if acw > 0 else _AUTO_COMPACT_BUFFER_PCT
+    usable_remaining = max(0.0, ((remaining - buffer_pct) / (100 - buffer_pct)) * 100)
+    return max(0, min(100, round(100 - usable_remaining)))
+
+
+def _current_task(session: str | None) -> str | None:
+    """The active in-progress todo for *session*, read from the todos dir.
+
+    Generic to Claude Code — no GSD coupling. Returns ``None`` on any miss.
+    """
+    if not session or re.search(r"[/\\]|\.\.", session):
+        return None
+    config_dir = os.getenv("CLAUDE_CONFIG_DIR") or os.path.join(
+        os.path.expanduser("~"), ".claude"
+    )
+    todos_dir = os.path.join(config_dir, "todos")
+    try:
+        files = [
+            f
+            for f in os.listdir(todos_dir)
+            if f.startswith(session) and "-agent-" in f and f.endswith(".json")
+        ]
+    except OSError:
+        return None
+    if not files:
+        return None
+    files.sort(key=lambda f: os.path.getmtime(os.path.join(todos_dir, f)), reverse=True)
+    try:
+        with open(os.path.join(todos_dir, files[0]), encoding="utf-8") as fh:
+            todos = json.load(fh)
+    except (OSError, ValueError):
+        return None
+    for t in todos if isinstance(todos, list) else []:
+        if isinstance(t, dict) and t.get("status") == "in_progress":
+            return t.get("activeForm") or t.get("content") or None
+    return None
+
+
+def system_context(data: dict) -> SystemContext:
+    """Derive the row-1 system segments from the Claude Code statusline payload."""
+    model = (data.get("model") or {}).get("display_name")
+    ctx_used = _ctx_used_pct(data.get("context_window") or {})
+    task = _current_task(data.get("session_id"))
+    return SystemContext(model=model, ctx_used=ctx_used, task=task)
+
+
+def _ctx_color(used: int) -> str:
+    if used < 50:
+        return _GREEN
+    if used < 65:
+        return _YELLOW
+    if used < 80:
+        return _ORANGE
+    return _RED
+
+
+def _ctx_meter(used: int, color: bool, cells: int = 12) -> str:
+    """A btop-style smooth context meter: ``ctx ▕████████▒▒▒▒▏ 58%``."""
+    used = max(0, min(100, used))
+    eighths = round(used / 100 * cells * 8)
+    full, rem = divmod(eighths, 8)
+    fill = "█" * full + (_METER_BLOCKS[rem - 1] if rem else "")
+    track = _METER_TRACK * (cells - len(fill))
+    c = _ctx_color(used)
+    skull = "💀 " if used >= 80 else ""
+    body = _paint(fill, c, color) + _paint(track, _DIM, color)
+    return (
+        f"{_paint('ctx', _DIM, color)} {skull}"
+        f"{_paint(_METER_L, _DIM, color)}{body}{_paint(_METER_R, _DIM, color)} "
+        f"{_paint(f'{used}%', c + _BOLD, color)}"
+    )
+
+
+def _system_line(system: SystemContext, color: bool) -> str:
+    parts = []
+    if system.model:
+        parts.append(_paint(system.model, _WHITE + _BOLD, color))
+    if system.ctx_used is not None:
+        parts.append(_ctx_meter(system.ctx_used, color))
+    if system.task:
+        task = system.task if len(system.task) <= 48 else system.task[:47] + "…"
+        parts.append(
+            _paint(f"{_TASK_GLYPH} ", _DIM, color) + _paint(task, _BLUE + _BOLD, color)
+        )
+    return _SYS_SEP.join(parts)
 
 
 # --- git context -------------------------------------------------------------
@@ -192,17 +319,27 @@ def _metrics_line(state: dict, color: bool) -> str:
 
 
 def render(
-    state: dict | None, git: GitContext | None = None, color: bool = True
+    state: dict | None,
+    git: GitContext | None = None,
+    system: SystemContext | None = None,
+    color: bool = True,
 ) -> str:
-    """Return the two-layer statusline.
+    """Return the three-layer statusline (btop-style stacked panels).
 
-    Row 1 is the git control (repo + branch). Row 2 is the clean-mcp layer
-    (overall TRUST gauge + per-metric bars, or a status message).
+    Row 1 is the system control (model · context meter · current task). Row 2
+    is the git control (repo + branch). Row 3 is the clean-mcp layer (overall
+    TRUST gauge + per-metric bars, or a status message). Empty rows are dropped.
     """
     state = state or {}
     have_git = git is not None and (git.repo or git.branch)
+    have_system = system is not None and (
+        system.model or system.ctx_used is not None or system.task
+    )
 
-    # --- row 1: git control ---
+    # --- row 1: system control ---
+    sys_row = _system_line(system, color) if have_system else ""
+
+    # --- row 2: git control ---
     git_row = _git_line(git, color) if have_git else ""
 
     # --- row 2: clean-mcp ---
@@ -233,7 +370,7 @@ def render(
             divider = _paint(_DIVIDER, _DIM, color)
             clean_row = overall + (f"{divider}{metrics}" if metrics else "")
 
-    rows = [r for r in (git_row, clean_row) if r]
+    rows = [r for r in (sys_row, git_row, clean_row) if r]
     return "\n".join(rows)
 
 
@@ -253,22 +390,27 @@ def legend() -> str:
     return "\n".join(lines)
 
 
-def _cwd_from_stdin() -> str:
+def _read_payload() -> dict:
+    """Parse the Claude Code statusline JSON from stdin (best-effort)."""
     if not sys.stdin.isatty():
         try:
-            data = json.loads(sys.stdin.read() or "{}")
-            ws = data.get("workspace") or {}
-            return ws.get("current_dir") or data.get("cwd") or os.getcwd()
+            return json.loads(sys.stdin.read() or "{}")
         except Exception:
             pass
-    return os.getcwd()
+    return {}
+
+
+def _cwd_from_payload(data: dict) -> str:
+    ws = data.get("workspace") or {}
+    return ws.get("current_dir") or data.get("cwd") or os.getcwd()
 
 
 def main() -> None:
     if len(sys.argv) > 1 and sys.argv[1] == "legend":
         print(legend())
         return
-    cwd = _cwd_from_stdin()
+    payload = _read_payload()
+    cwd = _cwd_from_payload(payload)
     state = ScoringStateWriter().read()
     # Tie the repo/branch to the file that was actually scored, so the label
     # always matches the numbers shown. Fall back to the shell cwd.
@@ -276,7 +418,8 @@ def main() -> None:
     if state and state.get("file_path"):
         anchor = os.path.dirname(state["file_path"]) or cwd
     git = git_context(anchor)
-    line = render(state, git, color=_use_color())
+    system = system_context(payload)
+    line = render(state, git, system, color=_use_color())
     if line:
         print(line)
 

@@ -35,7 +35,7 @@ already computes (the call graph, embeddings, and incremental/staleness state).
 | `state.py` | `ScoringStateWriter` — persists the latest score to `~/.clean/scoring.json`. |
 | `daemon.py` | Persistent scorer holding a warm embedding model (unix socket). |
 | `hook.py` | `clean-score` entry point: PostToolUse hook + `serve` subcommand. |
-| `statusline.py` | `clean-statusline` entry point: two-layer HUD (git row + clean-mcp row) + `legend`. |
+| `statusline.py` | `clean-statusline` entry point: three-panel btop-style HUD (system row: model · context meter · task / git row / clean-mcp row) + `legend`. |
 | `dashboard.py` | `clean-hud` entry point: full-screen TUI for a split pane (`--once` for one frame). |
 | `indicators/` | One file per indicator; `__init__.py` imports them so they self-register. |
 
