@@ -149,3 +149,13 @@ def test_sidebar_windows_to_keep_cursor_visible(tmp_path):
     )
     assert "f18.py" in out  # cursor row visible despite small viewport
     assert "›" in out  # cursor marker shown
+
+
+def test_preview_strips_read_source_gutter(tmp_path):
+    (tmp_path / "a.py").write_text("x = 1\ny = 2\n")
+    s = ExplorerState(root=treeview.build_root(str(tmp_path)))  # cursor on a.py
+    lines = _preview_lines(s, str(tmp_path), color=False, height=10)
+    body = "\n".join(lines[2:])  # skip header + blank
+    assert "|" not in body  # read_source's "N |" gutter stripped, not doubled
+    assert "x = 1" in body and "y = 2" in body
+    assert body.count("x = 1") == 1  # code not duplicated

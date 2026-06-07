@@ -33,6 +33,7 @@ _CLEAR = "\033[2J\033[H"
 _HIDE_CURSOR = "\033[?25l"
 _SHOW_CURSOR = "\033[?25h"
 _ANSI_RE = re.compile(r"\033\[[0-9;]*m")
+_GUTTER_RE = re.compile(r"^\s*\d+\s*\|\s?")  # read_source's " N | " line prefix
 
 
 def _strip_ansi(s: str) -> str:
@@ -140,7 +141,7 @@ def _preview_lines(
         label = score.get("overall_label", "")
         header = rel + "  " + _paint(f"{s}/100 {label}", _color(s) + _BOLD, color)
     try:
-        source, _meta = read_source(repo_root, rel, max_lines=height)
+        source, meta = read_source(repo_root, rel, max_lines=max(1, height - 2))
     except SourceReaderError:
         return [
             _paint(header, _WHITE + _BOLD, color),
@@ -149,11 +150,16 @@ def _preview_lines(
         ]
     lang = language_for(node.path)
     flags = _offender_map(score)
+    start = meta.get("start_line", 1)
     out = [_paint(header, _WHITE + _BOLD, color), ""]
-    for n, raw in enumerate(source.splitlines()[: height - 2], start=1):
-        marker = _paint(f"  ◀ {flags[n]}", _color(0), color) if n in flags else ""
-        gutter = _paint(f"{n:>4} ", _DIM, color)
-        out.append(f"{gutter}{highlight_line(raw, lang, color)}{marker}")
+    for offset, raw in enumerate(source.splitlines()):
+        lineno = start + offset
+        code = _GUTTER_RE.sub("", raw)
+        marker = (
+            _paint(f"  ◀ {flags[lineno]}", _color(0), color) if lineno in flags else ""
+        )
+        gutter = _paint(f"{lineno:>4} ", _DIM, color)
+        out.append(f"{gutter}{highlight_line(code, lang, color)}{marker}")
     return out
 
 
