@@ -5,7 +5,7 @@ from __future__ import annotations
 import os
 import subprocess
 
-from ..indexing.staleness import check_staleness
+from ..util.hashing import hash_file_content
 from ..util.logging import get_logger
 from .base import FileScore, Indicator, IndicatorResult, Offender, ScoringContext
 from .imports import extract_imported_names
@@ -125,7 +125,10 @@ class ScoringService:
             indexed = self._store.count(pid) > 0
         except Exception:
             indexed = False
-        stale = check_staleness(root, self._store, pid) if indexed else True
+        # Per-file staleness: is THIS file's indexed copy current? (Unlike a
+        # repo-wide git-dirty check, this clears once the file is re-indexed —
+        # which the warm daemon does before each score.)
+        stale = self._file_is_stale(pid, abs_file, source) if indexed else True
 
         imported, wildcard = extract_imported_names(parser.language, source)
 
@@ -169,6 +172,22 @@ class ScoringService:
         )
 
     # -- internals ----------------------------------------------------------
+
+    def _file_is_stale(self, pid: str, abs_file: str, source: bytes) -> bool:
+        """True if the file's indexed copy differs from *source* (or is absent)."""
+        try:
+            state = self._store.get_project_state(pid)
+        except Exception:
+            return True
+        if state is None:
+            return True
+        fs = state.files.get(abs_file)
+        if fs is None:
+            return True
+        try:
+            return hash_file_content(source) != fs.content_hash
+        except Exception:
+            return True
 
     def _run_indicator(
         self, indicator: Indicator, ctx: ScoringContext

@@ -62,7 +62,7 @@ def _hms(updated_at: str | None) -> str:
 
 
 def render_dashboard(
-    state: dict | None, git, width: int = 100, color: bool = True
+    state: dict | None, git, width: int = 100, color: bool = True, scroll: int = 0
 ) -> str:
     width = max(48, min(width, 160))
     bar_cells = max(20, min(48, width - 34))
@@ -135,11 +135,19 @@ def render_dashboard(
         for off in ind.get("offenders", []):
             offenders.append((name, off))
 
-    # --- flagged symbols --------------------------------------------------
+    # --- flagged symbols (scrollable) ------------------------------------
     if offenders:
         lines.append(_rule(width, color))
-        lines.append(_paint(" Flagged", _BOLD + _color(40), color))
-        for metric, off in offenders[:10]:
+        total = len(offenders)
+        rows = 10
+        scroll = max(0, min(scroll, max(0, total - 1)))
+        window = offenders[scroll : scroll + rows]
+        header = f" Flagged ({total})"
+        if total > rows:
+            last = scroll + len(window)
+            header += f"   showing {scroll + 1}-{last} · j/k or ↑/↓ to scroll"
+        lines.append(_paint(header, _BOLD + _color(40), color))
+        for metric, off in window:
             loc = f":{off['line']}" if off.get("line") else ""
             lines.append(
                 f"   {_paint(off['name'] + loc, _color(40) + _BOLD, color)}"
@@ -148,18 +156,20 @@ def render_dashboard(
             )
 
     lines.append(_rule(width, color))
-    lines.append(_paint(" Ctrl-C to quit · refreshes every 1s", _DIM, color))
+    lines.append(
+        _paint(" q quit · j/k or ↑/↓ scroll · refreshes every 1s", _DIM, color)
+    )
     return "\n".join(lines)
 
 
-def _frame(writer: ScoringStateWriter, color: bool) -> str:
+def _frame(writer: ScoringStateWriter, color: bool, scroll: int = 0) -> str:
     state = writer.read()
     anchor = os.getcwd()
     if state and state.get("file_path"):
         anchor = os.path.dirname(state["file_path"]) or anchor
     git = git_context(anchor)
     width = shutil.get_terminal_size((100, 30)).columns
-    return render_dashboard(state, git, width=width, color=color)
+    return render_dashboard(state, git, width=width, color=color, scroll=scroll)
 
 
 def main() -> None:
@@ -172,15 +182,51 @@ def main() -> None:
         return
 
     interval = float(os.getenv("CLEAN_HUD_INTERVAL", "1") or "1")
+
+    # Non-interactive (piped) — just refresh on the interval, no key handling.
+    if not sys.stdin.isatty():
+        try:
+            while True:
+                sys.stdout.write(_CLEAR + _frame(writer, color) + "\n")
+                sys.stdout.flush()
+                time.sleep(interval)
+        except KeyboardInterrupt:
+            return
+        return
+
+    _interactive_loop(writer, color, interval)
+
+
+def _interactive_loop(writer: ScoringStateWriter, color: bool, interval: float) -> None:
+    import select
+    import termios
+    import tty
+
+    fd = sys.stdin.fileno()
+    old = termios.tcgetattr(fd)
+    scroll = 0
     sys.stdout.write(_HIDE_CURSOR)
     try:
+        tty.setcbreak(fd)
         while True:
-            sys.stdout.write(_CLEAR + _frame(writer, color) + "\n")
+            sys.stdout.write(_CLEAR + _frame(writer, color, scroll) + "\n")
             sys.stdout.flush()
-            time.sleep(interval)
+            ready, _, _ = select.select([sys.stdin], [], [], interval)
+            if not ready:
+                continue
+            ch = os.read(fd, 3).decode("utf-8", "ignore")
+            if ch in ("q", "Q", "\x03"):  # q / Ctrl-C
+                break
+            if ch in ("j", "\x1b[B"):  # down
+                scroll += 1
+            elif ch in ("k", "\x1b[A"):  # up
+                scroll = max(0, scroll - 1)
+            elif ch in ("g", "\x1b[H"):  # home
+                scroll = 0
     except KeyboardInterrupt:
         pass
     finally:
+        termios.tcsetattr(fd, termios.TCSADRAIN, old)
         sys.stdout.write(_SHOW_CURSOR + "\n")
         sys.stdout.flush()
 

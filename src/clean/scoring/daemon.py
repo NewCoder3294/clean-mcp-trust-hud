@@ -17,6 +17,7 @@ from pathlib import Path
 
 from ..services.container import ServiceContainer
 from ..util.logging import get_logger
+from .service import _git_toplevel, _project_id_for
 from .state import ScoringStateWriter, file_score_to_dict
 
 logger = get_logger(__name__)
@@ -36,6 +37,18 @@ def _handle_request(
     file_path = payload.get("file_path")
     if not file_path:
         return {"error": "missing file_path"}
+
+    # Refresh the index for the edited file FIRST (incremental — only changed
+    # files re-embed) so the score is computed against current content and the
+    # 'stale' flag clears. Only for already-indexed projects (avoids a surprise
+    # full index on first touch).
+    root = _git_toplevel(file_path) or os.path.dirname(os.path.abspath(file_path))
+    try:
+        if container.store.count(_project_id_for(root)) > 0:
+            container.indexer.index(root)
+    except Exception:
+        logger.exception("daemon incremental reindex failed for %s", root)
+
     score = container.scoring.score_file(file_path, with_embeddings=True)
     writer.write(score)
     return file_score_to_dict(score)

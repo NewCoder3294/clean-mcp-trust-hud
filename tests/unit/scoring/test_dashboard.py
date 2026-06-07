@@ -82,3 +82,23 @@ def test_dashboard_not_indexed_hint():
 def test_dashboard_emits_ansi_when_colored():
     out = render_dashboard(_state(), _GIT, width=100, color=True)
     assert "\033[" in out
+
+
+def test_dashboard_scrolls_flagged_list():
+    offs = [{"name": f"sym{i}", "detail": "x", "line": i} for i in range(15)]
+    st = _state(
+        indicators=[
+            {
+                "key": "orphan",
+                "score": 40,
+                "summary": "many",
+                "skipped": False,
+                "offenders": offs,
+            },
+        ]
+    )
+    top = render_dashboard(st, _GIT, width=100, color=False, scroll=0)
+    assert "sym0" in top and "sym14" not in top  # windowed to first 10
+    assert "showing 1-10" in top
+    scrolled = render_dashboard(st, _GIT, width=100, color=False, scroll=5)
+    assert "sym14" in scrolled and "sym0" not in scrolled
