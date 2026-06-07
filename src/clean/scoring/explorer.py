@@ -32,6 +32,8 @@ from .statusline import (
 _CLEAR = "\033[2J\033[H"
 _HIDE_CURSOR = "\033[?25l"
 _SHOW_CURSOR = "\033[?25h"
+_ALT_ON = "\033[?1049h"  # alternate screen buffer (like vim/less) — no scrollback spam
+_ALT_OFF = "\033[?1049l"  # restore the normal screen on exit
 _ANSI_RE = re.compile(r"\033\[[0-9;]*m")
 _GUTTER_RE = re.compile(r"^\s*\d+\s*\|\s?")  # read_source's " N | " line prefix
 
@@ -181,7 +183,9 @@ def render(
         head += _paint("  ⎇ ", _DIM, color) + _paint(branch, _CYAN, color)
 
     body_h = max(1, height - 3)
-    show_preview = width >= 80
+    # In --sidebar mode the code opens in the editor pane, so never draw our own
+    # preview — render the tree only, regardless of how wide the pane is.
+    show_preview = width >= 80 and not sidebar
     sidebar_w = 34 if show_preview else width
     sidebar_lines = _sidebar_lines(state, color, body_h)
     preview = _preview_lines(state, repo_root, color, body_h) if show_preview else []
@@ -338,7 +342,7 @@ def _interactive_loop(
 
     fd = sys.stdin.fileno()
     old = termios.tcgetattr(fd)
-    sys.stdout.write(_HIDE_CURSOR)
+    sys.stdout.write(_ALT_ON + _HIDE_CURSOR)
     try:
         tty.setcbreak(fd)
         while True:
@@ -346,6 +350,8 @@ def _interactive_loop(
             if cur and not cur.is_dir and cur.path not in state.score_cache:
                 _score_for(state, cur.path, repo_root)
             w, h = _terminal_size()
+            # Home + repaint (no trailing newline — a trailing newline scrolls
+            # the pane and makes the top row disappear).
             sys.stdout.write(
                 _CLEAR
                 + render(
@@ -358,7 +364,6 @@ def _interactive_loop(
                     color=color,
                     sidebar=bool(sidebar_target),
                 )
-                + "\n"
             )
             sys.stdout.flush()
             ready, _, _ = select.select([sys.stdin], [], [], 30)
@@ -380,7 +385,7 @@ def _interactive_loop(
         pass
     finally:
         termios.tcsetattr(fd, termios.TCSADRAIN, old)
-        sys.stdout.write(_SHOW_CURSOR + "\n")
+        sys.stdout.write(_SHOW_CURSOR + _ALT_OFF)
         sys.stdout.flush()
     if ide_session:
         subprocess.run(_tmux_kill_session(ide_session), check=False)

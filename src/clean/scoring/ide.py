@@ -15,7 +15,7 @@ import shutil
 import subprocess
 import sys
 
-_SIDEBAR_WIDTH = "36"  # columns for the right-hand tree pane
+_SIDEBAR_WIDTH = "40"  # columns for the right-hand tree pane (pinned on resize)
 
 
 def _require_tmux() -> None:
@@ -71,7 +71,8 @@ def main() -> None:
         ).stdout.strip()
 
         # Narrow right pane runs the sidebar, told which pane to open files into.
-        subprocess.run(
+        # -P -F captures the new pane's id so we can pin its width.
+        sidebar_pane = subprocess.run(
             [
                 "tmux",
                 "split-window",
@@ -82,10 +83,15 @@ def main() -> None:
                 session,
                 "-c",
                 cwd,
+                "-P",
+                "-F",
+                "#{pane_id}",
                 _sidebar_command(sys.executable, editor_pane, session),
             ],
+            capture_output=True,
+            text=True,
             check=True,
-        )
+        ).stdout.strip()
     except subprocess.CalledProcessError:
         # Don't leave a half-built detached session orphaned.
         subprocess.run(["tmux", "kill-session", "-t", session], check=False)
@@ -94,6 +100,19 @@ def main() -> None:
     # Niceties: click-to-focus panes; hide the tmux status bar; start in editor.
     for opt in (["mouse", "on"], ["status", "off"]):
         subprocess.run(["tmux", "set-option", "-t", session, *opt], check=False)
+    # Keep the sidebar pinned narrow when the window is resized (so the editor
+    # stays wide and the tree never balloons past its tree-only width).
+    subprocess.run(
+        [
+            "tmux",
+            "set-hook",
+            "-t",
+            session,
+            "window-resized",
+            f"resize-pane -t {sidebar_pane} -x {_SIDEBAR_WIDTH}",
+        ],
+        check=False,
+    )
     subprocess.run(["tmux", "select-pane", "-t", editor_pane], check=False)
 
     # Replace this process with the attached session (blocks until it ends).

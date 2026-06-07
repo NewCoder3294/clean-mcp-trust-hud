@@ -228,7 +228,10 @@ def test_open_in_pane_swallows_oserror(monkeypatch, capsys):
 
 def test_tmux_kill_session_builds_command():
     assert explorer._tmux_kill_session("clean-ide-9") == [
-        "tmux", "kill-session", "-t", "clean-ide-9",
+        "tmux",
+        "kill-session",
+        "-t",
+        "clean-ide-9",
     ]
 
 
@@ -258,6 +261,47 @@ def test_render_sidebar_footer_hint(tmp_path):
 
     (tmp_path / "a.py").write_text("x = 1\n")
     st = ExplorerState(root=treeview.build_root(str(tmp_path)))
-    out = render(st, repo="o/r", branch=None, repo_root=str(tmp_path),
-                 width=100, height=10, color=False, sidebar=True)
+    out = render(
+        st,
+        repo="o/r",
+        branch=None,
+        repo_root=str(tmp_path),
+        width=100,
+        height=10,
+        color=False,
+        sidebar=True,
+    )
     assert "e → editor" in out and "e vim" not in out
+
+
+def test_sidebar_mode_renders_tree_only_even_when_wide(tmp_path):
+    """In --sidebar mode the preview pane is suppressed regardless of width, so
+    the code opens in the editor pane instead of inside clean-tree."""
+    from clean.scoring import treeview
+    from clean.scoring.navigate import ExplorerState
+
+    (tmp_path / "a.py").write_text("x = 1\n")
+    st = ExplorerState(root=treeview.build_root(str(tmp_path)))
+    wide_sidebar = render(
+        st,
+        repo="o/r",
+        branch=None,
+        repo_root=str(tmp_path),
+        width=160,
+        height=12,
+        color=False,
+        sidebar=True,
+    )
+    wide_normal = render(
+        st,
+        repo="o/r",
+        branch=None,
+        repo_root=str(tmp_path),
+        width=160,
+        height=12,
+        color=False,
+        sidebar=False,
+    )
+    assert "│" not in wide_sidebar  # no internal tree|preview divider
+    assert "(directory)" not in wide_sidebar
+    assert "│" in wide_normal  # normal wide mode still splits
