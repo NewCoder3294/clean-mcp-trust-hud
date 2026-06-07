@@ -113,6 +113,7 @@ class FileScore:
     indicators: list[IndicatorResult]
     entity_count: int
     stale: bool
+    indexed: bool = True
     skipped: bool = False
 
 

@@ -26,6 +26,7 @@ def file_score_to_dict(score: FileScore, updated_at: str | None = None) -> dict:
         "overall_score": score.overall_score,
         "overall_label": score.overall_label,
         "stale": score.stale,
+        "indexed": score.indexed,
         "skipped": score.skipped,
         "entity_count": score.entity_count,
         "indicators": [

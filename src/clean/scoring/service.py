@@ -149,6 +149,9 @@ class ScoringService:
             results.append(self._run_indicator(indicator, ctx))
 
         overall, label = self._aggregate_overall(results)
+        if not indexed:
+            # Nothing to resolve against — report "unmeasured", not "risky".
+            label = "NO INDEX"
         return FileScore(
             project_id=pid,
             file_path=abs_file,
@@ -157,6 +160,7 @@ class ScoringService:
             indicators=results,
             entity_count=len(edited),
             stale=stale,
+            indexed=indexed,
         )
 
     # -- internals ----------------------------------------------------------

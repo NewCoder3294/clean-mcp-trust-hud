@@ -55,6 +55,12 @@ def render(state: dict | None, color: bool = True) -> str:
     def paint(text: str, c: str) -> str:
         return f"{c}{text}{_RESET}" if color else text
 
+    # Project not indexed: the scores are unmeasured, not bad — render a
+    # neutral, dim hint to index rather than an alarming red 0.
+    if not state.get("indexed", True):
+        pid = state.get("project_id") or "this repo"
+        return paint(f"🛡 {pid}: not indexed", _DIM)
+
     overall = int(state.get("overall_score", 100))
     label = state.get("overall_label", "OK")
     prefix = "⚠ " if state.get("stale") else ""
