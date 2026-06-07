@@ -91,9 +91,9 @@ def _circle(score: int) -> str:
 
 
 def _use_color() -> bool:
-    if os.getenv("NO_COLOR"):
-        return False
-    return sys.stdout.isatty() or os.getenv("CLEAN_FORCE_COLOR") == "1"
+    # Claude Code captures the statusline over a pipe (not a TTY) but DOES render
+    # ANSI color — so emit color by default; only honor an explicit NO_COLOR.
+    return os.getenv("NO_COLOR") is None
 
 
 # --- git context -------------------------------------------------------------

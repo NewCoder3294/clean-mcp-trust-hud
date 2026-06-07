@@ -48,6 +48,7 @@ dev = [
 clean = "clean.local.mcp_server:main"
 clean-score = "clean.scoring.hook:main"
 clean-statusline = "clean.scoring.statusline:main"
+clean-hud = "clean.scoring.dashboard:main"
 
 [tool.hatch.build.targets.wheel]
 packages = ["src/clean"]
