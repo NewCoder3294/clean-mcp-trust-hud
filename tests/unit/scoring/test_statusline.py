@@ -13,6 +13,7 @@ def _state(**over):
         "project_id": "proj",
         "indicators": [
             {"key": "grounding", "label": "Grounding", "score": 80, "skipped": False},
+            {"key": "blast_radius", "label": "Impact", "score": 100, "skipped": False},
             {"key": "index_trust", "label": "Index", "score": 40, "skipped": False},
         ],
     }
@@ -24,8 +25,14 @@ def test_render_uses_plain_english_labels_and_score():
     line = render(_state(), color=False)
     assert "82/100 REVIEW" in line
     assert "Real calls" in line  # grounding -> plain label
-    assert "Index" in line
+    assert "Impact" in line
     assert "grounding" not in line  # raw keys never shown
+
+
+def test_index_trust_is_not_shown_as_a_bar():
+    # index_trust is folded into the 'stale' tag, not the metric line.
+    line = render(_state(), color=False)
+    assert "Index" not in line
 
 
 def test_render_is_two_lines_with_metrics():

@@ -3,13 +3,14 @@
 Renders a two-line, charted, color-coded Trust-HUD for the Claude Code
 statusline from ~/.clean/scoring.json:
 
-    repo cleanmcp/clean-mcp   branch feat/trust-hud   Trust ◕ 82/100 OK
-       Real calls ████░ 80 · Impact █████ 100 · Used ██░░░ 40 · Index ██░░░ 40
+    repo cleanmcp/clean-mcp   branch feat/trust-hud   TRUST ◕ ███████████░░░ 82/100 OK
+       Real calls ████████░░  80    Impact ██████████ 100    Used ████░░░░░░  40
 
-- a circle gauge (○◔◑◕●) for the overall trust score
-- a 5-cell bar chart per metric, green/amber/red by health
+- a circle gauge (○◔◑◕●) plus a 14-cell bar for the overall trust score
+- a 10-cell bar chart per metric, bright green/amber/red by health
 - full, plain-English metric names (run `clean-statusline legend` for meanings)
-- the current GitHub repo (owner/repo) and branch, derived from cwd
+- repo + branch derived from the SCORED file (so the label matches the numbers)
+- index freshness shown as a "stale" tag, not its own bar
 - no emojis — plain colored text plus unicode chart glyphs only
 
 Claude Code passes a session JSON object on stdin; we use it for the cwd.
@@ -29,10 +30,13 @@ from .state import ScoringStateWriter
 _RESET = "\033[0m"
 _BOLD = "\033[1m"
 _DIM = "\033[2m"
-_GREEN = "\033[32m"
-_YELLOW = "\033[33m"
-_RED = "\033[31m"
-_CYAN = "\033[36m"
+# Bright (high-intensity) ANSI colors for a more vivid HUD.
+_GREEN = "\033[92m"
+_YELLOW = "\033[93m"
+_RED = "\033[91m"
+_CYAN = "\033[96m"
+_BLUE = "\033[94m"
+_WHITE = "\033[97m"
 
 # Plain-English label + one-line meaning for each indicator.
 _LABELS = {
@@ -52,10 +56,13 @@ _MEANING = {
     "duplication": "Is this new, or a near-duplicate of existing code?",
 }
 
-_BARS = "▁▂▃▄▅▆▇█"
+# Which metrics to SHOW on the bar line, in order. index_trust is intentionally
+# omitted — its signal is already the "stale" tag on the overall line.
+_DISPLAY_ORDER = ["grounding", "blast_radius", "orphan", "alignment", "duplication"]
+
 _CIRCLES = "○◔◑◕●"
-_METRIC_SEP = " · "
-_GROUP_SEP = "   "
+_METRIC_SEP = "    "
+_GROUP_SEP = "      "
 
 _REPO_RE = re.compile(r"[:/]([A-Za-z0-9._-]+/[A-Za-z0-9._-]+?)(?:\.git)?$")
 
@@ -74,7 +81,7 @@ def _color(score: int) -> str:
     return _RED
 
 
-def _bar(score: int, cells: int = 5) -> str:
+def _bar(score: int, cells: int = 10) -> str:
     filled = max(0, min(cells, round(score / 100 * cells)))
     return "█" * filled + "░" * (cells - filled)
 
@@ -133,7 +140,9 @@ def _paint(text: str, c: str, color: bool) -> str:
 def _git_line(git: GitContext, color: bool) -> str:
     parts = []
     if git.repo:
-        parts.append(_paint("repo ", _DIM, color) + _paint(git.repo, _BOLD, color))
+        parts.append(
+            _paint("repo ", _DIM, color) + _paint(git.repo, _WHITE + _BOLD, color)
+        )
     if git.branch:
         parts.append(
             _paint("branch ", _DIM, color) + _paint(git.branch, _CYAN + _BOLD, color)
@@ -144,23 +153,29 @@ def _git_line(git: GitContext, color: bool) -> str:
 def _overall_chunk(state: dict, color: bool) -> str:
     overall = int(state.get("overall_score", 100))
     label = state.get("overall_label", "OK")
-    prefix = _paint("stale ", _YELLOW, color) if state.get("stale") else ""
-    circle = _paint(_circle(overall), _color(overall), color)
+    prefix = (
+        _paint("● stale", _YELLOW + _BOLD, color) + "  " if state.get("stale") else ""
+    )
+    circle = _paint(_circle(overall), _color(overall) + _BOLD, color)
+    bar = _paint(_bar(overall, cells=14), _color(overall), color)
     text = _paint(f"{overall}/100 {label}", _color(overall) + _BOLD, color)
-    return f"{prefix}{_paint('Trust', _BOLD, color)} {circle} {text}"
+    return f"{prefix}{_paint('TRUST', _BOLD + _WHITE, color)} {circle} {bar} {text}"
 
 
 def _metrics_line(state: dict, color: bool) -> str:
+    by_key = {i["key"]: i for i in state.get("indicators", [])}
     chunks = []
-    for ind in state.get("indicators", []):
-        if ind.get("skipped"):
+    for key in _DISPLAY_ORDER:
+        ind = by_key.get(key)
+        if ind is None or ind.get("skipped"):
             continue
-        name = _LABELS.get(ind["key"], ind["key"])
+        name = _LABELS.get(key, key)
         s = int(ind["score"])
+        c = _color(s)
         chunks.append(
-            f"{_paint(name, _BOLD, color)} "
-            f"{_paint(_bar(s), _color(s), color)} "
-            f"{_paint(str(s), _color(s), color)}"
+            f"{_paint(name, c + _BOLD, color)} "
+            f"{_paint(_bar(s), c, color)} "
+            f"{_paint(f'{s:>3}', c + _BOLD, color)}"
         )
     if not chunks:
         return ""
@@ -205,13 +220,16 @@ def render(
 
 def legend() -> str:
     """Human-readable explanation of each metric (for `clean-statusline legend`)."""
-    lines = ["Trust-HUD metrics — overall 'Trust' is a 0-100 weighted blend:", ""]
-    for key, name in _LABELS.items():
-        lines.append(f"  {name:<11} {_MEANING[key]}")
+    lines = ["Trust-HUD metrics — overall TRUST is a 0-100 weighted blend:", ""]
+    for key in _DISPLAY_ORDER:
+        lines.append(f"  {_LABELS[key]:<11} {_MEANING[key]}")
     lines += [
         "",
+        f"  ({_LABELS['index_trust']}: {_MEANING['index_trust']} — shown as the",
+        "   'stale' tag rather than its own bar.)",
+        "",
         "  Bars/circle: green >=85 OK · amber 60-84 REVIEW · red <60 RISK.",
-        "  'stale' = code index is behind the working tree (re-index for accuracy).",
+        "  Style/Unique appear only when the warm daemon runs (clean-score serve).",
     ]
     return "\n".join(lines)
 
@@ -232,8 +250,13 @@ def main() -> None:
         print(legend())
         return
     cwd = _cwd_from_stdin()
-    git = git_context(cwd)
     state = ScoringStateWriter().read()
+    # Tie the repo/branch to the file that was actually scored, so the label
+    # always matches the numbers shown. Fall back to the shell cwd.
+    anchor = cwd
+    if state and state.get("file_path"):
+        anchor = os.path.dirname(state["file_path"]) or cwd
+    git = git_context(anchor)
     line = render(state, git, color=_use_color())
     if line:
         print(line)
