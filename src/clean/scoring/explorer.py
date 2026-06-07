@@ -96,7 +96,74 @@ def _score_for(state: ExplorerState, path: str, repo_root: str) -> dict | None:
     return score
 
 
-def _sidebar_lines(state: ExplorerState, color: bool, height: int) -> list[str]:
+def _truncate(text: str, maxlen: int) -> str:
+    """Right-truncate *text* to *maxlen* chars with an ellipsis."""
+    if maxlen <= 0:
+        return ""
+    if len(text) <= maxlen:
+        return text
+    if maxlen == 1:
+        return "…"
+    return text[: maxlen - 1] + "…"
+
+
+def _clip(s: str, width: int) -> str:
+    """Truncate an ANSI-colored string to *width* visible columns (no wrap).
+
+    Zero-width ANSI escapes are copied verbatim; only printable columns count.
+    A reset is appended so a clipped color never bleeds into the next line.
+    """
+    if width <= 0:
+        return ""
+    out: list[str] = []
+    visible = 0
+    i = 0
+    n = len(s)
+    while i < n:
+        if s[i] == "\033":
+            m = _ANSI_RE.match(s, i)
+            if m:
+                out.append(m.group())
+                i = m.end()
+                continue
+        if visible >= width:
+            break
+        out.append(s[i])
+        visible += 1
+        i += 1
+    out.append("\033[0m")
+    return "".join(out)
+
+
+def _split_keys(data: str) -> list[str]:
+    """Split a batched terminal read into individual key tokens.
+
+    A fast typist (or a held key, or a paste) delivers several bytes in one
+    read; without splitting, ``"jjj"`` would be handed to the reducer as a
+    single unrecognized key and silently dropped. Escape sequences (arrow keys,
+    Home/End) are kept whole; every other byte is its own key.
+    """
+    keys: list[str] = []
+    i = 0
+    n = len(data)
+    while i < n:
+        if data[i] == "\x1b" and i + 1 < n and data[i + 1] == "[":
+            j = i + 2
+            while j < n and not (data[j].isalpha() or data[j] == "~"):
+                j += 1
+            if j < n:
+                j += 1  # include the terminating letter / '~'
+            keys.append(data[i:j])
+            i = j
+        else:
+            keys.append(data[i])
+            i += 1
+    return keys
+
+
+def _sidebar_lines(
+    state: ExplorerState, color: bool, height: int, width: int
+) -> list[str]:
     rows = visible_rows(state)
     n = len(rows)
     # Scroll-window so the cursor stays visible even when the tree is taller
@@ -109,9 +176,12 @@ def _sidebar_lines(state: ExplorerState, color: bool, height: int) -> list[str]:
     for offset, node in enumerate(rows[start : start + height]):
         idx = start + offset
         indent = "  " * node.depth
+        # Fixed-width furniture is 2 (cursor prefix) + 2*depth (indent).
         if node.is_dir:
             caret = "▾ " if node.expanded else "▸ "
-            body = _paint(caret + node.name + "/", _CYAN, color)
+            # caret (2) + name + "/" (1)
+            name = _truncate(node.name, max(1, width - 2 - len(indent) - 3))
+            body = _paint(caret + name + "/", _CYAN, color)
             row = f"{indent}{body}"
         else:
             score = state.score_cache.get(node.path)
@@ -121,11 +191,13 @@ def _sidebar_lines(state: ExplorerState, color: bool, height: int) -> list[str]:
                 if score and score.get("overall_score") is not None
                 else "   "
             )
-            row = f"{indent}{_paint(glyph, c, color)} {node.name}  {_paint(num, c, color)}"
+            # glyph (1) + space (1) + name + "  " (2) + score (3)
+            name = _truncate(node.name, max(1, width - 2 - len(indent) - 7))
+            row = f"{indent}{_paint(glyph, c, color)} {name}  {_paint(num, c, color)}"
         prefix = (
             _paint("›", _WHITE + _BOLD, color) + " " if idx == state.cursor else "  "
         )
-        lines.append(prefix + row)
+        lines.append(_clip(prefix + row, width))
     return lines
 
 
@@ -176,18 +248,25 @@ def render(
     color: bool,
     sidebar: bool = False,
 ) -> str:
-    """Pure full-frame render (no terminal I/O)."""
-    head = _paint("clean", _WHITE + _BOLD, color) + _paint(" ▸ ", _DIM, color)
-    head += _paint(repo or os.path.basename(repo_root), _WHITE + _BOLD, color)
-    if branch:
-        head += _paint("  ⎇ ", _DIM, color) + _paint(branch, _CYAN, color)
-
+    """Pure full-frame render (no terminal I/O). No emitted line exceeds *width*."""
     body_h = max(1, height - 3)
     # In --sidebar mode the code opens in the editor pane, so never draw our own
     # preview — render the tree only, regardless of how wide the pane is.
     show_preview = width >= 80 and not sidebar
+    narrow = sidebar or width < 60
     sidebar_w = 34 if show_preview else width
-    sidebar_lines = _sidebar_lines(state, color, body_h)
+
+    # Header — compact (repo basename, no branch) when there's no room.
+    repo_name = repo or os.path.basename(repo_root)
+    if narrow:
+        repo_name = os.path.basename(repo_name)
+    head = _paint("clean", _WHITE + _BOLD, color) + _paint(" ▸ ", _DIM, color)
+    head += _paint(repo_name, _WHITE + _BOLD, color)
+    if branch and not narrow:
+        head += _paint("  ⎇ ", _DIM, color) + _paint(branch, _CYAN, color)
+    head = _clip(head, width)
+
+    sidebar_lines = _sidebar_lines(state, color, body_h, sidebar_w)
     preview = _preview_lines(state, repo_root, color, body_h) if show_preview else []
 
     rows_out = []
@@ -197,16 +276,18 @@ def render(
             visible = _strip_ansi(left)
             pad = " " * max(0, sidebar_w - len(visible))
             right = preview[i] if i < len(preview) else ""
-            rows_out.append(f"{left}{pad}{_paint('│', _DIM, color)} {right}")
+            rows_out.append(
+                _clip(f"{left}{pad}{_paint('│', _DIM, color)} {right}", width)
+            )
         else:
-            rows_out.append(left)
+            rows_out.append(_clip(left, width))
 
-    open_hint = "e → editor" if sidebar else "e vim"
-    footer = _paint(
-        f"j/k move · l/⏎ open · h close · {open_hint} · r rescore · q quit",
-        _DIM,
-        color,
+    footer_text = (
+        "j/k move · ⏎ open · q quit"
+        if narrow
+        else "j/k move · l/⏎ open · h close · e vim · r rescore · q quit"
     )
+    footer = _clip(_paint(footer_text, _DIM, color), width)
     return "\n".join([head, ""] + rows_out + [footer])
 
 
@@ -369,18 +450,25 @@ def _interactive_loop(
             ready, _, _ = select.select([sys.stdin], [], [], 30)
             if not ready:
                 continue
-            ch = os.read(fd, 3).decode("utf-8", "ignore")
-            state, action = reduce(state, ch)
-            if action == "quit":
+            # Read a generous buffer and dispatch each key — a single os.read
+            # can batch several fast keystrokes (or an escape sequence).
+            data = os.read(fd, 64).decode("utf-8", "ignore")
+            quit_now = False
+            for key in _split_keys(data):
+                state, action = reduce(state, key)
+                if action == "quit":
+                    quit_now = True
+                    break
+                if action == "open":
+                    node = current(state)
+                    if node and not node.is_dir:
+                        line = _first_flagged_line(state.score_cache.get(node.path))
+                        if sidebar_target:
+                            _open_in_pane(sidebar_target, node.path, line)
+                        else:
+                            _open_in_editor(node.path, line, fd, old)
+            if quit_now:
                 break
-            if action == "open":
-                node = current(state)
-                if node and not node.is_dir:
-                    line = _first_flagged_line(state.score_cache.get(node.path))
-                    if sidebar_target:
-                        _open_in_pane(sidebar_target, node.path, line)
-                    else:
-                        _open_in_editor(node.path, line, fd, old)
     except KeyboardInterrupt:
         pass
     finally:

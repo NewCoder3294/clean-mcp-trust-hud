@@ -255,23 +255,38 @@ def test_main_passes_sidebar_target_and_session_to_loop(monkeypatch, tmp_path):
     assert seen["session"] == "clean-ide-77"
 
 
-def test_render_sidebar_footer_hint(tmp_path):
+def test_render_sidebar_uses_compact_footer(tmp_path):
     from clean.scoring import treeview
     from clean.scoring.navigate import ExplorerState
 
     (tmp_path / "a.py").write_text("x = 1\n")
     st = ExplorerState(root=treeview.build_root(str(tmp_path)))
-    out = render(
+    # Sidebar mode (narrow) → compact footer that fits a 40-col pane.
+    narrow = render(
         st,
         repo="o/r",
         branch=None,
         repo_root=str(tmp_path),
-        width=100,
+        width=40,
         height=10,
         color=False,
         sidebar=True,
     )
-    assert "e → editor" in out and "e vim" not in out
+    footer = narrow.split("\n")[-1]
+    assert "⏎ open" in footer and "q quit" in footer
+    assert "r rescore" not in footer  # the long hints are dropped when narrow
+    # Wide standalone (non-sidebar) → full footer with all hints.
+    wide = render(
+        st,
+        repo="o/r",
+        branch=None,
+        repo_root=str(tmp_path),
+        width=120,
+        height=10,
+        color=False,
+        sidebar=False,
+    )
+    assert "r rescore" in wide and "h close" in wide
 
 
 def test_sidebar_mode_renders_tree_only_even_when_wide(tmp_path):
@@ -305,3 +320,36 @@ def test_sidebar_mode_renders_tree_only_even_when_wide(tmp_path):
     assert "│" not in wide_sidebar  # no internal tree|preview divider
     assert "(directory)" not in wide_sidebar
     assert "│" in wide_normal  # normal wide mode still splits
+
+
+def test_sidebar_truncates_long_names_no_wrap(tmp_path):
+    """Every rendered line must fit the width — long filenames are ellipsized,
+    not wrapped (wrapping scrolled the pane and hid the header)."""
+    from clean.scoring import treeview
+    from clean.scoring.navigate import ExplorerState
+    from clean.scoring.explorer import _strip_ansi
+
+    longname = "2026-06-07-clean-ide-tmux-sidebar-really-long-name.md"
+    (tmp_path / longname).write_text("x")
+    st = ExplorerState(root=treeview.build_root(str(tmp_path)))
+    out = render(
+        st,
+        repo="o/r",
+        branch="main",
+        repo_root=str(tmp_path),
+        width=40,
+        height=12,
+        color=False,
+        sidebar=True,
+    )
+    for line in out.split("\n"):
+        assert len(_strip_ansi(line)) <= 40  # nothing exceeds the pane width
+    assert "…" in out  # the long name was ellipsized
+
+
+def test_split_keys_batched_and_escape_sequences():
+    assert explorer._split_keys("jjj") == ["j", "j", "j"]
+    assert explorer._split_keys("\x1b[B") == ["\x1b[B"]  # down-arrow kept whole
+    assert explorer._split_keys("\x1b[Bk") == ["\x1b[B", "k"]
+    assert explorer._split_keys("j\rq") == ["j", "\r", "q"]
+    assert explorer._split_keys("") == []
