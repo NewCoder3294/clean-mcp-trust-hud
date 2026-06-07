@@ -97,7 +97,7 @@ def main() -> None:
         subprocess.run(["tmux", "kill-session", "-t", session], check=False)
         raise
 
-    # Niceties: click-to-focus panes; hide the tmux status bar; start in editor.
+    # Niceties: click-to-focus panes; hide the tmux status bar.
     for opt in (["mouse", "on"], ["status", "off"]):
         subprocess.run(["tmux", "set-option", "-t", session, *opt], check=False)
     # Keep the sidebar pinned narrow when the window is resized (so the editor
@@ -113,7 +113,9 @@ def main() -> None:
         ],
         check=False,
     )
-    subprocess.run(["tmux", "select-pane", "-t", editor_pane], check=False)
+    # Start focused on the sidebar so the first keys navigate the tree; opening
+    # a file then jumps focus to the editor pane.
+    subprocess.run(["tmux", "select-pane", "-t", sidebar_pane], check=False)
 
     # Replace this process with the attached session (blocks until it ends).
     os.execvp("tmux", ["tmux", "attach-session", "-t", session])

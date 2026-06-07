@@ -34,10 +34,11 @@ format:
 	$(PYTHON) -m ruff format src/ tests/
 	$(PYTHON) -m ruff check --fix src/ tests/
 
-## ide — Kill stray tmux sessions, then launch the docked clean-ide sidebar.
+## ide — Kill stray clean-ide sessions, then launch the docked sidebar.
 ##        Run this in a real terminal window (it takes over the screen via tmux).
+##        Only clean-ide-* sessions are killed — other tmux sessions are left alone.
 ide:
-	-tmux kill-server 2>/dev/null || true
+	-@tmux ls 2>/dev/null | grep '^clean-ide-' | cut -d: -f1 | while read s; do tmux kill-session -t "$$s" 2>/dev/null; done || true
 	$(VENV_BIN)/clean-ide
 
 ## tree — Launch the full-screen clean-tree explorer (run in a real terminal).

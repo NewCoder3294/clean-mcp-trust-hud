@@ -320,7 +320,9 @@ def _tmux_send_keys(target: str, path: str, line: int) -> list[str]:
         "-t",
         target,
         "Escape",
-        f":edit +{line} {vim_path}",
+        # ":hide edit" hides the current (possibly modified) buffer instead of
+        # refusing with E37, so opening another file always succeeds.
+        f":hide edit +{line} {vim_path}",
         "Enter",
     ]
 

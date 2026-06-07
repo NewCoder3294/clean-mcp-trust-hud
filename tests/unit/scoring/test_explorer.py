@@ -170,19 +170,19 @@ def test_tmux_send_keys_builds_open_command():
         "-t",
         "%3",
         "Escape",
-        ":edit +12 /repo/src/a.py",
+        ":hide edit +12 /repo/src/a.py",
         "Enter",
     ]
 
 
 def test_tmux_send_keys_escapes_spaces_for_vim():
     cmd = explorer._tmux_send_keys("%3", "/repo/a b.py", 1)
-    assert cmd[-2] == r":edit +1 /repo/a\ b.py"
+    assert cmd[-2] == r":hide edit +1 /repo/a\ b.py"
 
 
 def test_tmux_send_keys_escapes_vim_specials():
     cmd = explorer._tmux_send_keys("%3", "/repo/a|b%c#d`e.py", 1)
-    assert cmd[-2] == r":edit +1 /repo/a\|b\%c\#d\`e.py"
+    assert cmd[-2] == r":hide edit +1 /repo/a\|b\%c\#d\`e.py"
 
 
 def test_tmux_send_keys_rejects_newline():
