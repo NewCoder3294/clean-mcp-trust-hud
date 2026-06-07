@@ -6,9 +6,10 @@ from clean.scoring import ide
 
 
 def test_sidebar_command_uses_module_invocation():
-    cmd = ide._sidebar_command("/usr/bin/python3", "%4")
+    cmd = ide._sidebar_command("/usr/bin/python3", "%4", "clean-ide-123")
     assert "clean.scoring.explorer --sidebar" in cmd
     assert "CLEAN_TREE_TARGET=%4" in cmd
+    assert "CLEAN_IDE_SESSION=clean-ide-123" in cmd
     assert "/usr/bin/python3" in cmd
 
 

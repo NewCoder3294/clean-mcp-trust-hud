@@ -204,3 +204,40 @@ def test_open_in_pane_swallows_oserror(monkeypatch, capsys):
     monkeypatch.setattr(explorer.subprocess, "run", boom)
     explorer._open_in_pane("%5", "/repo/a.py", 7)  # must not raise
     assert "tmux error" in capsys.readouterr().err
+
+
+def test_tmux_kill_session_builds_command():
+    assert explorer._tmux_kill_session("clean-ide-9") == [
+        "tmux", "kill-session", "-t", "clean-ide-9",
+    ]
+
+
+def test_main_passes_sidebar_target_and_session_to_loop(monkeypatch, tmp_path):
+    import sys as _sys
+
+    seen = {}
+
+    def fake_loop(state, repo_root, git, color, sidebar_target=None, ide_session=None):
+        seen["target"] = sidebar_target
+        seen["session"] = ide_session
+
+    monkeypatch.setattr(explorer, "_interactive_loop", fake_loop)
+    monkeypatch.setattr(_sys, "argv", ["clean-tree", "--sidebar"])
+    monkeypatch.setenv("CLEAN_TREE_TARGET", "%9")
+    monkeypatch.setenv("CLEAN_IDE_SESSION", "clean-ide-77")
+    monkeypatch.chdir(tmp_path)
+    (tmp_path / "x.py").write_text("x")
+    explorer.main()
+    assert seen["target"] == "%9"
+    assert seen["session"] == "clean-ide-77"
+
+
+def test_render_sidebar_footer_hint(tmp_path):
+    from clean.scoring import treeview
+    from clean.scoring.navigate import ExplorerState
+
+    (tmp_path / "a.py").write_text("x = 1\n")
+    st = ExplorerState(root=treeview.build_root(str(tmp_path)))
+    out = render(st, repo="o/r", branch=None, repo_root=str(tmp_path),
+                 width=100, height=10, color=False, sidebar=True)
+    assert "e → editor" in out and "e vim" not in out

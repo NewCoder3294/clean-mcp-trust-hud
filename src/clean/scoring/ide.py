@@ -3,8 +3,8 @@
 One command opens an IDE-style layout in any terminal that can run tmux: the
 main pane runs your editor; a narrow right pane runs ``clean-tree --sidebar``.
 Pressing Enter on a file in the sidebar opens it in the editor pane. Quitting
-the sidebar (or the editor) tears the session down. tmux is required but stays
-invisible — you only ever run ``clean-ide``.
+the sidebar (``q``) or the editor tears the whole session down. tmux is required
+but stays invisible — you only ever run ``clean-ide``.
 """
 
 from __future__ import annotations
@@ -22,7 +22,8 @@ def _require_tmux() -> None:
     if shutil.which("tmux") is None:
         sys.exit(
             "clean-ide needs tmux (it stays hidden). Install it with:\n"
-            "  brew install tmux\n"
+            "  brew install tmux   # macOS\n"
+            "  apt install tmux    # Debian/Ubuntu\n"
         )
 
 
@@ -31,11 +32,14 @@ def _editor_command(editor: str) -> list[str]:
     return ["sh", "-c", editor]
 
 
-def _sidebar_command(python: str, editor_pane: str) -> str:
+def _sidebar_command(python: str, editor_pane: str, session: str) -> str:
     """Shell command for the sidebar pane: run the explorer in --sidebar mode
-    with the editor pane id exported so 'open' targets it."""
+    with the editor pane id (open target) and session name (quit target)."""
     run = f"{shlex.quote(python)} -m clean.scoring.explorer --sidebar"
-    return f"CLEAN_TREE_TARGET={editor_pane} {run}"
+    return (
+        f"CLEAN_TREE_TARGET={editor_pane} "
+        f"CLEAN_IDE_SESSION={shlex.quote(session)} {run}"
+    )
 
 
 def main() -> None:
@@ -78,7 +82,7 @@ def main() -> None:
                 session,
                 "-c",
                 cwd,
-                _sidebar_command(sys.executable, editor_pane),
+                _sidebar_command(sys.executable, editor_pane, session),
             ],
             check=True,
         )

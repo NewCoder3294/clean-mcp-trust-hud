@@ -172,6 +172,7 @@ def render(
     width: int,
     height: int,
     color: bool,
+    sidebar: bool = False,
 ) -> str:
     """Pure full-frame render (no terminal I/O)."""
     head = _paint("clean", _WHITE + _BOLD, color) + _paint(" ▸ ", _DIM, color)
@@ -182,12 +183,12 @@ def render(
     body_h = max(1, height - 3)
     show_preview = width >= 80
     sidebar_w = 34 if show_preview else width
-    sidebar = _sidebar_lines(state, color, body_h)
+    sidebar_lines = _sidebar_lines(state, color, body_h)
     preview = _preview_lines(state, repo_root, color, body_h) if show_preview else []
 
     rows_out = []
     for i in range(body_h):
-        left = sidebar[i] if i < len(sidebar) else ""
+        left = sidebar_lines[i] if i < len(sidebar_lines) else ""
         if show_preview:
             visible = _strip_ansi(left)
             pad = " " * max(0, sidebar_w - len(visible))
@@ -196,8 +197,11 @@ def render(
         else:
             rows_out.append(left)
 
+    open_hint = "e → editor" if sidebar else "e vim"
     footer = _paint(
-        "j/k move · l/⏎ open · h close · e vim · r rescore · q quit", _DIM, color
+        f"j/k move · l/⏎ open · h close · {open_hint} · r rescore · q quit",
+        _DIM,
+        color,
     )
     return "\n".join([head, ""] + rows_out + [footer])
 
@@ -220,6 +224,11 @@ def _tmux_send_keys(target: str, path: str, line: int) -> list[str]:
         f":edit +{line} {vim_path}",
         "Enter",
     ]
+
+
+def _tmux_kill_session(session: str) -> list[str]:
+    """tmux argv to destroy the whole IDE session (used on sidebar quit)."""
+    return ["tmux", "kill-session", "-t", session]
 
 
 def _open_in_pane(target: str, path: str, line: int) -> None:
@@ -274,7 +283,9 @@ def main() -> None:
     git = git_context(repo_root)
     state = ExplorerState(root=treeview.build_root(repo_root))
 
-    if "--once" in sys.argv[1:] or not sys.stdin.isatty():
+    in_sidebar = "--sidebar" in sys.argv[1:]
+
+    if "--once" in sys.argv[1:] or (not sys.stdin.isatty() and not in_sidebar):
         w, h = _terminal_size()
         cur = current(state)
         if cur and not cur.is_dir:
@@ -292,14 +303,16 @@ def main() -> None:
         )
         return
 
-    # Sidebar mode: opening a file targets the editor in another tmux pane.
-    sidebar_target = (
-        os.environ.get("CLEAN_TREE_TARGET") if "--sidebar" in sys.argv[1:] else None
-    )
-    _interactive_loop(state, repo_root, git, color, sidebar_target)
+    # Sidebar mode: opening a file targets the editor in another tmux pane, and
+    # quitting tears the whole IDE session down.
+    sidebar_target = os.environ.get("CLEAN_TREE_TARGET") if in_sidebar else None
+    ide_session = os.environ.get("CLEAN_IDE_SESSION") if in_sidebar else None
+    _interactive_loop(state, repo_root, git, color, sidebar_target, ide_session)
 
 
-def _interactive_loop(state, repo_root, git, color, sidebar_target=None) -> None:
+def _interactive_loop(
+    state, repo_root, git, color, sidebar_target=None, ide_session=None
+) -> None:
     import select
     import termios
     import tty
@@ -324,6 +337,7 @@ def _interactive_loop(state, repo_root, git, color, sidebar_target=None) -> None
                     width=w,
                     height=h,
                     color=color,
+                    sidebar=bool(sidebar_target),
                 )
                 + "\n"
             )
@@ -349,6 +363,8 @@ def _interactive_loop(state, repo_root, git, color, sidebar_target=None) -> None
         termios.tcsetattr(fd, termios.TCSADRAIN, old)
         sys.stdout.write(_SHOW_CURSOR + "\n")
         sys.stdout.flush()
+    if ide_session:
+        subprocess.run(_tmux_kill_session(ide_session), check=False)
 
 
 if __name__ == "__main__":
