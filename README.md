@@ -230,6 +230,8 @@ falls back to the fast, no-model indicators if it isn't running). You can also
 call the `score_file` / `score_change` MCP tools directly. Configure via
 `CLEAN_SCORING_*` env vars. See [src/clean/scoring/docs.md](src/clean/scoring/docs.md).
 
+`clean-ide` — IDE layout: your editor on the left, the trust-colored tree as a docked right sidebar; Enter opens files into the editor (needs tmux).
+
 ## Development
 
 ```bash

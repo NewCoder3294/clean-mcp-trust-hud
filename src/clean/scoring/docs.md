@@ -41,6 +41,7 @@ already computes (the call graph, embeddings, and incremental/staleness state).
 | `highlight.py` | Dependency-free per-line syntax highlighter (Python/JS/TS) for the explorer preview. |
 | `navigate.py` | Pure key reducer (`reduce(state, key) -> (state, action)`) for the explorer; no terminal I/O. |
 | `explorer.py` | `clean-tree` entry point: trust-colored file-tree sidebar + syntax-highlighted, Trust-HUD-flagged preview; opens files in `$EDITOR`/vim at the first flagged line. |
+| `ide.py` | `clean-ide` entry point: launches a tmux session (editor pane + narrow `clean-tree --sidebar` pane) so opening a file in the tree loads it in the editor. tmux required but hidden. |
 | `indicators/` | One file per indicator; `__init__.py` imports them so they self-register. |
 
 ## The indicators

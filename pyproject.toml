@@ -50,6 +50,7 @@ clean-score = "clean.scoring.hook:main"
 clean-statusline = "clean.scoring.statusline:main"
 clean-hud = "clean.scoring.dashboard:main"
 clean-tree = "clean.scoring.explorer:main"
+clean-ide = "clean.scoring.ide:main"
 
 [tool.hatch.build.targets.wheel]
 packages = ["src/clean"]
