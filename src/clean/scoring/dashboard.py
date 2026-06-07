@@ -22,13 +22,13 @@ from .statusline import (
     _BOLD,
     _CYAN,
     _DIM,
-    _RESET,
     _WHITE,
     _bar,
     _circle,
     _color,
     _LABELS,
     _MEANING,
+    _paint,
     git_context,
 )
 
@@ -45,10 +45,6 @@ _DASH_ORDER = [
 _CLEAR = "\033[2J\033[H"
 _HIDE_CURSOR = "\033[?25l"
 _SHOW_CURSOR = "\033[?25h"
-
-
-def _paint(text: str, c: str, color: bool) -> str:
-    return f"{c}{text}{_RESET}" if color else text
 
 
 def _rule(width: int, color: bool) -> str:
