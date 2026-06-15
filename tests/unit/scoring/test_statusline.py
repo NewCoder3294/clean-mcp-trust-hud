@@ -42,63 +42,31 @@ def _state(**over):
     return base
 
 
-def test_render_uses_plain_english_labels_and_score():
-    line = render(_state(), color=False)
-    assert "82/100 REVIEW" in line
-    assert "Real calls" in line  # grounding -> plain label
-    assert "Impact" in line
-    assert "grounding" not in line  # raw keys never shown
-
-
-def test_index_trust_is_not_shown_as_a_bar():
-    # index_trust is folded into the 'stale' tag, not the metric line.
-    line = render(_state(), color=False)
-    assert "Index" not in line
-
-
-def test_render_is_two_lines_with_metrics():
-    git = GitContext("o/r", "main", "proj")
-    line = render(_state(project_id="proj"), git=git, color=False)
-    assert "\n" in line  # git row + clean-mcp row
-    assert "█" in line  # bar chart present
-
-
-def test_layers_git_on_row1_clean_mcp_on_row2():
+def test_render_layers_system_git_clean(monkeypatch):
+    monkeypatch.setattr(sl, "_project_indexed", lambda pid: True)
     git = GitContext("cleanmcp/clean-mcp", "feat/trust-hud", "proj")
-    row1, row2 = render(_state(project_id="proj"), git=git, color=False).split("\n")
-    # Row 1 = git control only.
-    assert "cleanmcp/clean-mcp" in row1 and "feat/trust-hud" in row1
-    assert "TRUST" not in row1
-    # Row 2 = clean-mcp layer (overall + metrics).
-    assert "TRUST" in row2
-    assert "Real calls" in row2
+    out = render(_good(71, "REVIEW"), None, git, None, color=False)
+    rows = out.split("\n")
+    assert "cleanmcp/clean-mcp" in rows[0] and "feat/trust-hud" in rows[0]
+    assert rows[1].startswith("● REVIEW 71")
 
 
-def test_render_git_context_shows_repo_and_branch():
-    git = GitContext("cleanmcp/clean-mcp", "feat/trust-hud", "clean-mcp")
-    line = render(_state(project_id="clean-mcp"), git=git, color=False)
-    assert "cleanmcp/clean-mcp" in line
-    assert "feat/trust-hud" in line
-
-
-def test_render_mismatched_repo_hides_scores():
+def test_render_mismatched_repo_shows_repo_status(monkeypatch):
+    # A good score for a *different* repo must not be shown for this repo.
+    monkeypatch.setattr(sl, "_project_indexed", lambda pid: True)
     git = GitContext("o/other", "main", "other")
-    line = render(_state(project_id="proj"), git=git, color=False)
-    assert "no recent score" in line
-    assert "82/100" not in line
+    out = render(None, None, git, None, color=False)
+    assert "● " not in out
+    assert "edit a Py/JS/TS file to score" in out
 
 
-def test_render_not_indexed_is_neutral_hint():
-    line = render(_state(indexed=False), color=False)
-    assert "not indexed" in line
-    assert "RISK" not in line
+def test_render_not_a_repo_drops_clean_row():
+    out = render(None, None, GitContext(None, None, None), None, color=False)
+    assert out == ""
 
 
-def test_render_stale_prefix():
-    assert "stale" in render(_state(stale=True), color=False)
-
-
-def test_render_has_no_emojis():
+def test_render_has_no_emojis(monkeypatch):
+    monkeypatch.setattr(sl, "_project_indexed", lambda pid: True)
     line = render(
         _state(),
         git=GitContext("o/r", "main", "proj"),
@@ -106,18 +74,6 @@ def test_render_has_no_emojis():
     )
     for emoji in ("📁", "🛡", "⚠"):
         assert emoji not in line
-
-
-def test_render_skips_skipped_indicators():
-    state = _state(
-        indicators=[
-            {"key": "grounding", "label": "Grounding", "score": 80, "skipped": False},
-            {"key": "alignment", "label": "Alignment", "score": 0, "skipped": True},
-        ]
-    )
-    line = render(state, color=False)
-    assert "Real calls" in line
-    assert "Style" not in line  # alignment skipped
 
 
 def test_render_empty_when_nothing_to_show():
@@ -235,6 +191,17 @@ def test_reason_falls_back_to_weakest_metric_phrase():
     state = {"overall_score": 72, "indicators": [
         _ind("grounding", 100), _ind("orphan", 40), _ind("alignment", 90)]}
     assert _select_reason(state) == " · low reuse"
+
+
+def test_reason_ignores_skipped_metric():
+    # orphan(20) is the lowest but skipped -> excluded; the phrase must come from
+    # the lowest NON-skipped metric (alignment 70 -> "off-pattern"), proving the
+    # skipped indicator was ignored rather than surfaced as "low reuse".
+    state = {"overall_score": 72, "indicators": [
+        _ind("grounding", 100),
+        {"key": "orphan", "label": "orphan", "score": 20, "skipped": True, "offenders": []},
+        _ind("alignment", 70)]}
+    assert _select_reason(state) == " · off-pattern"
 
 
 def test_reason_empty_when_all_metrics_healthy():

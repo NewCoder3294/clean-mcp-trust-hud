@@ -35,7 +35,7 @@ import sys
 from typing import NamedTuple
 
 from ..mcp.shared import resolve_local_project_id
-from .state import ScoringStateWriter
+from .state import ScoringStateWriter, read_repo_score
 
 _RESET = "\033[0m"
 _BOLD = "\033[1m"
@@ -426,59 +426,29 @@ def _metrics_line(state: dict, color: bool) -> str:
 
 
 def render(
-    state: dict | None,
+    repo_state: dict | None,
+    recent: dict | None = None,
     git: GitContext | None = None,
     system: SystemContext | None = None,
     color: bool = True,
 ) -> str:
-    """Return the three-layer statusline (btop-style stacked panels).
+    """Assemble the stacked HUD: row 1 system, row 2 git, row 3 clean-mcp.
 
-    Row 1 is the system control (model · context meter · current task). Row 2
-    is the git control (repo + branch). Row 3 is the clean-mcp layer (overall
-    TRUST gauge + per-metric bars, or a status message). Empty rows are dropped.
+    ``repo_state`` is the current repo's last good score (or None). ``recent`` is
+    the most-recent-event marker, used only to flag a just-skipped file. Empty
+    rows are dropped.
     """
-    state = state or {}
-    have_git = git is not None and (git.repo or git.branch)
-    have_system = system is not None and (
+    rows = []
+    if system is not None and (
         system.model or system.ctx_used is not None or system.task
-    )
-
-    # --- row 1: system control ---
-    sys_row = _system_line(system, color) if have_system else ""
-
-    # --- row 2: git control ---
-    git_row = _git_line(git, color) if have_git else ""
-
-    # --- row 2: clean-mcp ---
-    clean_row = ""
-    if state and not state.get("skipped"):
-        mismatch = (
-            git is not None
-            and git.project_id
-            and state.get("project_id")
-            and state["project_id"] != git.project_id
-        )
-        if mismatch:
-            clean_row = (
-                _paint("clean", _DIM, color)
-                + "  "
-                + _paint("no recent score for this repo", _DIM, color)
-            )
-        elif not state.get("indexed", True):
-            repo = (git.repo if git else None) or state.get("project_id") or "this repo"
-            clean_row = (
-                _paint("clean", _DIM, color)
-                + "  "
-                + _paint(f"not indexed — run: index {repo}", _DIM, color)
-            )
-        else:
-            overall = _overall_chunk(state, color)
-            metrics = _metrics_line(state, color)
-            divider = _paint(_DIVIDER, _DIM, color)
-            clean_row = overall + (f"{divider}{metrics}" if metrics else "")
-
-    rows = [r for r in (sys_row, git_row, clean_row) if r]
-    return "\n".join(rows)
+    ):
+        rows.append(_system_line(system, color))
+    if git is not None and (git.repo or git.branch):
+        rows.append(_git_line(git, color))
+    clean_row = build_clean_row(repo_state, recent, git, color)
+    if clean_row:
+        rows.append(clean_row)
+    return "\n".join(r for r in rows if r)
 
 
 def legend() -> str:
@@ -518,15 +488,11 @@ def main() -> None:
         return
     payload = _read_payload()
     cwd = _cwd_from_payload(payload)
-    state = ScoringStateWriter().read()
-    # Tie the repo/branch to the file that was actually scored, so the label
-    # always matches the numbers shown. Fall back to the shell cwd.
-    anchor = cwd
-    if state and state.get("file_path"):
-        anchor = os.path.dirname(state["file_path"]) or cwd
-    git = git_context(anchor)
+    git = git_context(cwd)  # follow me: anchor to where you are, not what you scored
+    repo_state = read_repo_score(git.project_id) if git.project_id else None
+    recent = ScoringStateWriter().read()
     system = system_context(payload)
-    line = render(state, git, system, color=_use_color())
+    line = render(repo_state, recent, git, system, color=_use_color())
     if line:
         print(line)
 
