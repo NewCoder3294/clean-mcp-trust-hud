@@ -2,6 +2,7 @@
 
 import json
 
+import clean.scoring.statusline as sl
 from clean.scoring.statusline import (
     GitContext,
     SystemContext,
@@ -9,7 +10,9 @@ from clean.scoring.statusline import (
     _ctx_meter,
     _ctx_used_pct,
     _current_task,
+    _lang_from_path,
     _select_reason,
+    build_clean_row,
     legend,
     render,
     system_context,
@@ -247,3 +250,71 @@ def test_reason_check_singular_call():
 def test_reason_caps_exactly_three_offenders():
     state = {"overall_score": 71, "indicators": [_ind("grounding", 30, ["a", "b", "c"])]}
     assert _select_reason(state) == " · check 3 calls: a, b +1"
+
+
+# --- build_clean_row (row-3 state machine) ------------------------------------
+
+
+def _good(score=71, label="REVIEW", offenders=("load_index", "warm_model")):
+    return {"overall_score": score, "overall_label": label, "skipped": False,
+            "project_id": "proj",
+            "indicators": [_ind("grounding", 50, list(offenders))]}
+
+
+GIT = GitContext("o/repo", "main", "proj")
+
+
+def test_lang_from_path_known_and_unknown():
+    assert _lang_from_path("/x/View.swift") == "Swift"
+    assert _lang_from_path("/x/mod.py") == "Python"
+    assert _lang_from_path("/x/data.zzz") == "ZZZ"
+    assert _lang_from_path(None) is None
+
+
+def test_clean_row_ok_is_calm():
+    row = build_clean_row(_good(96, "OK", ()), None, GIT, color=False)
+    assert row == "● OK 96"
+
+
+def test_clean_row_review_names_calls():
+    row = build_clean_row(_good(71, "REVIEW"), None, GIT, color=False)
+    assert row == "● REVIEW 71 · check 2 calls: load_index, warm_model"
+
+
+def test_clean_row_risk_wording():
+    row = build_clean_row(_good(38, "RISK", ("foo",)), None, GIT, color=False)
+    assert row == "● RISK 38 · likely hallucinated: foo"
+
+
+def test_clean_row_last_good_when_current_file_skipped():
+    recent = {"skipped": True, "project_id": "proj", "file_path": "/x/View.swift"}
+    row = build_clean_row(_good(71, "REVIEW", ()), recent, GIT, color=False)
+    assert row == "○ 71 REVIEW · last good · Swift not scored"
+
+
+def test_clean_row_not_a_repo_is_empty():
+    assert build_clean_row(None, None, GitContext(None, None, None), color=False) == ""
+
+
+def test_clean_row_indexed_but_unscored(monkeypatch):
+    monkeypatch.setattr(sl, "_project_indexed", lambda pid: True)
+    assert build_clean_row(None, None, GIT, color=False) == "clean · edit a Py/JS/TS file to score"
+
+
+def test_clean_row_not_indexed(monkeypatch):
+    monkeypatch.setattr(sl, "_project_indexed", lambda pid: False)
+    row = build_clean_row(None, None, GitContext("o/repo", "main", "proj"), color=False)
+    assert row == "clean · not indexed — index o/repo"
+
+
+def test_clean_row_skipped_recent_wrong_project_falls_through_to_live():
+    # recent skip belongs to a DIFFERENT repo -> not just_skipped_here -> live verdict.
+    recent = {"skipped": True, "project_id": "OTHER", "file_path": "/x/View.swift"}
+    row = build_clean_row(_good(71, "REVIEW"), recent, GIT, color=False)
+    assert row == "● REVIEW 71 · check 2 calls: load_index, warm_model"
+
+
+def test_clean_row_last_good_without_file_path_omits_language_note():
+    recent = {"skipped": True, "project_id": "proj", "file_path": None}
+    row = build_clean_row(_good(71, "REVIEW", ()), recent, GIT, color=False)
+    assert row == "○ 71 REVIEW · last good"

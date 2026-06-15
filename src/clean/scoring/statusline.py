@@ -29,6 +29,7 @@ from __future__ import annotations
 import json
 import os
 import re
+import sqlite3
 import subprocess
 import sys
 from typing import NamedTuple
@@ -320,6 +321,76 @@ def _select_reason(state: dict) -> str:
         if worst_score < 85:
             return f" · {_METRIC_PHRASE[worst_key]}"
     return ""
+
+
+_LANG_BY_EXT = {
+    ".py": "Python", ".js": "JavaScript", ".jsx": "JavaScript",
+    ".ts": "TypeScript", ".tsx": "TypeScript", ".swift": "Swift",
+    ".go": "Go", ".rs": "Rust", ".rb": "Ruby", ".java": "Java",
+    ".c": "C", ".cpp": "C++", ".cs": "C#", ".kt": "Kotlin",
+}
+
+
+def _lang_from_path(path: str | None) -> str | None:
+    """Human language name from a file extension (best-effort)."""
+    if not path:
+        return None
+    _, ext = os.path.splitext(path)
+    if not ext:
+        return None
+    return _LANG_BY_EXT.get(ext.lower()) or ext.lstrip(".").upper()
+
+
+def _project_indexed(project_id: str) -> bool:
+    """True if the index metadata has a row for this project_id. Cheap, best-effort."""
+    if not project_id:
+        return False
+    db = os.getenv("CLEAN_DB_PATH") or os.path.join(
+        os.path.expanduser("~"), ".clean", "metadata.db"
+    )
+    try:
+        con = sqlite3.connect(db, timeout=0.5)
+        try:
+            row = con.execute(
+                "select 1 from projects where project_id=? limit 1", (project_id,)
+            ).fetchone()
+        finally:
+            con.close()
+        return row is not None
+    except Exception:
+        return False
+
+
+def build_clean_row(
+    repo_state: dict | None, recent: dict | None, git: GitContext | None, color: bool
+) -> str:
+    """Resolve and render row 3 (the clean-mcp layer) for the *current* repo."""
+    if git is None or not (git.repo or git.branch):
+        return ""  # not a git repo -> drop row 3
+
+    if repo_state is not None and not repo_state.get("skipped"):
+        score = int(repo_state.get("overall_score", 100))
+        label = repo_state.get("overall_label", "OK")
+        recent_pid = recent.get("project_id") if recent else None
+        just_skipped_here = bool(
+            recent and recent.get("skipped") and recent_pid and recent_pid == git.project_id
+        )
+        if just_skipped_here:
+            lang = _lang_from_path(recent.get("file_path"))
+            note = f" · {lang} not scored" if lang else ""
+            dot = _paint("○", _DIM, color)
+            body = _paint(f"{score} {label} · last good{note}", _DIM, color)
+            return f"{dot} {body}"
+        c = _color(score)
+        dot = _paint("●", c + _BOLD, color)
+        verdict = _paint(f"{label} {score}", c + _BOLD, color)
+        reason = _select_reason(repo_state)
+        return f"{dot} {verdict}{_paint(reason, _DIM, color)}"
+
+    if repo_state is not None or _project_indexed(git.project_id):
+        return _paint("clean · edit a Py/JS/TS file to score", _DIM, color)
+    repo = git.repo or git.project_id or "this repo"
+    return _paint(f"clean · not indexed — index {repo}", _DIM, color)
 
 
 def _overall_chunk(state: dict, color: bool) -> str:
