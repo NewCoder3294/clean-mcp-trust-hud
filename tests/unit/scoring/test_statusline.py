@@ -303,3 +303,10 @@ def test_clean_row_no_fix_suffix_when_none(monkeypatch):
     monkeypatch.setattr(sl, "read_fixes", lambda pid: [])
     row = build_clean_row(_good(96, "OK", ()), None, GIT, color=False)
     assert "fix ready" not in row and "fixes ready" not in row
+
+
+def test_clean_row_no_fix_suffix_when_no_project_id(monkeypatch):
+    monkeypatch.setattr(sl, "read_fixes", lambda pid: [{"id": "a"}])  # would add suffix IF called
+    git = GitContext("o/repo", "main", None)  # no project_id -> guard short-circuits
+    row = build_clean_row(_good(38, "RISK", ("load_index",)), None, git, color=False)
+    assert "fix ready" not in row

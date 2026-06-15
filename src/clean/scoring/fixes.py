@@ -64,13 +64,23 @@ def read_fixes(project_id: str, base: Path = FIX_INBOX_DIR) -> list[dict]:
 
 
 def write_fixes(project_id: str, entries: list[dict], base: Path = FIX_INBOX_DIR) -> None:
-    """Replace a repo's inbox. Best-effort; never raises."""
+    """Replace a repo's inbox atomically. Best-effort; never raises."""
     if not project_id:
         return
     try:
         base.mkdir(parents=True, exist_ok=True)
-        with open(_inbox_path(project_id, base), "w", encoding="utf-8") as fh:
-            json.dump(entries, fh, indent=2)
+        target = _inbox_path(project_id, base)
+        fd, tmp = tempfile.mkstemp(dir=str(target.parent), suffix=".tmp")
+        try:
+            with os.fdopen(fd, "w", encoding="utf-8") as fh:
+                json.dump(entries, fh, indent=2)
+            os.replace(tmp, target)
+        except Exception:
+            try:
+                os.unlink(tmp)
+            except OSError:
+                pass
+            raise
     except Exception:
         pass
 

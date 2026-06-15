@@ -48,7 +48,8 @@ def test_propose_queues_a_fix_for_high_confidence_hallucination(tmp_path):
     assert fixes[0]["candidates"] == ["load_repo_index"]
 
 
-def test_no_fix_when_index_stale(tmp_path):
+def test_no_fix_when_grounding_confidence_below_threshold(tmp_path):
+    # confidence 0.7 (stale index, see grounding.py) must NOT trigger a fix
     store = _FakeStore(["load_repo_index"])
     propose_fixes(_score(confidence=0.7), store, base=tmp_path)
     assert read_fixes("proj", base=tmp_path) == []
@@ -255,6 +256,22 @@ def test_cli_bad_args_prints_usage(tmp_path, monkeypatch, capsys):
     monkeypatch.setattr("sys.argv", ["clean-fixes", "bogus"])
     fixes_mod.main()
     assert "usage: clean-fixes" in capsys.readouterr().out
+
+
+def test_cli_apply_stale_removes_ghost_entry(tmp_path, monkeypatch, capsys):
+    monkeypatch.setattr(fixes_mod, "FIX_INBOX_DIR", tmp_path)
+    monkeypatch.setattr(fixes_mod, "_current_project_id", lambda: "proj")
+    f = tmp_path / "mod.py"
+    f.write_text("def g():\n    return other()\n")  # bad symbol absent -> stale
+    entry = {"id": "ghost1", "file_path": str(f), "line": 1, "bad_symbol": "load_index",
+             "candidates": ["load_repo_index"], "created_at": "t"}
+    write_fixes("proj", [entry], base=tmp_path)
+    monkeypatch.setattr("sys.argv", ["clean-fixes", "apply", "ghost1"])
+    fixes_mod.main()
+    out = capsys.readouterr().out.lower()
+    assert "stale" in out
+    assert read_fixes("proj", base=tmp_path) == []  # ghost pruned
+    assert f.read_text() == "def g():\n    return other()\n"  # file untouched
 
 
 def test_hook_inline_calls_propose_fixes(monkeypatch):
