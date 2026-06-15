@@ -17,7 +17,7 @@ import shutil
 import sys
 import time
 
-from .state import ScoringStateWriter
+from .state import ScoringStateWriter, read_repo_score
 from .statusline import (
     _BOLD,
     _CYAN,
@@ -159,11 +159,16 @@ def render_dashboard(
 
 
 def _frame(writer: ScoringStateWriter, color: bool, scroll: int = 0) -> str:
-    state = writer.read()
-    anchor = os.getcwd()
-    if state and state.get("file_path"):
-        anchor = os.path.dirname(state["file_path"]) or anchor
-    git = git_context(anchor)
+    # Follow the launch directory's repo, exactly like the statusline: one
+    # git_context call drives both the header label and the score lookup. We
+    # never show another repo's numbers — inside a repo we show that repo's
+    # score (or "waiting"); only when outside any git repo do we fall back to
+    # the global most-recent score.
+    git = git_context(os.getcwd())
+    if git.project_id:
+        state = read_repo_score(git.project_id) or {}
+    else:
+        state = writer.read() or {}
     width = shutil.get_terminal_size((100, 30)).columns
     return render_dashboard(state, git, width=width, color=color, scroll=scroll)
 
