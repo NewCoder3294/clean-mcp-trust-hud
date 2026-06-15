@@ -2,8 +2,6 @@
 
 from __future__ import annotations
 
-import os
-
 from ..core.config import CleanConfig
 from ..core.models import CodeEntity
 from ..core.protocols import Embedder, VectorStore
@@ -132,4 +130,9 @@ class CodeSearcher:
 
     @staticmethod
     def _project_id(path: str) -> str:
-        return os.path.basename(os.path.abspath(path)).lower().replace(" ", "_")
+        """Project ID for *path* via the shared resolver, so search reads the
+        same table ``index_repo`` wrote (git ``owner/repo``+branch, or
+        ``local/<folder>``) instead of a divergent bare basename."""
+        from ..mcp.shared import resolve_local_project_id
+
+        return resolve_local_project_id(path)

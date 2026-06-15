@@ -43,6 +43,47 @@ def test_explicit_branch_overrides_detection(tmp_path, monkeypatch):
     )
 
 
+def test_indexer_default_project_id_matches_resolver(tmp_path, monkeypatch):
+    """The indexer's *default* project ID (when ``index()`` is called with no
+    explicit ``project_id``) must key the index the same way consumers look it
+    up. It previously used the bare folder basename, so the daemon's
+    incremental reindex (``indexer.index(root)``, no project_id) wrote fresh
+    data to an orphan table the HUD never read — leaving the HUD on a stale
+    index. This locks the indexer to :func:`resolve_local_project_id`.
+    """
+    from clean.indexing.indexer import CodebaseIndexer
+
+    monkeypatch.setattr(
+        shared, "_detect_git_repo", lambda p: "NewCoder3294/clean-mcp-trust-hud"
+    )
+    monkeypatch.setattr(shared, "_detect_git_branch", lambda p: "feat/trust-hud")
+
+    root = str(tmp_path)
+    assert CodebaseIndexer._project_id(root) == resolve_local_project_id(root)
+    assert (
+        CodebaseIndexer._project_id(root)
+        == "newcoder3294--clean-mcp-trust-hud--feat_trust-hud"
+    )
+
+
+def test_searcher_default_project_id_matches_resolver(tmp_path, monkeypatch):
+    """``search_code`` must read the table ``index_repo`` wrote. The searcher's
+    default project ID previously used the bare basename, so searching a
+    git-backed repo (indexed under ``owner/repo``+branch) returned nothing.
+    This locks the searcher to :func:`resolve_local_project_id`, in lockstep
+    with the indexer (see ``test_indexer_default_project_id_matches_resolver``).
+    """
+    from clean.search.searcher import CodeSearcher
+
+    monkeypatch.setattr(
+        shared, "_detect_git_repo", lambda p: "NewCoder3294/clean-mcp-trust-hud"
+    )
+    monkeypatch.setattr(shared, "_detect_git_branch", lambda p: "feat/trust-hud")
+
+    root = str(tmp_path)
+    assert CodeSearcher._project_id(root) == resolve_local_project_id(root)
+
+
 def test_scoring_and_statusline_resolve_identically(tmp_path, monkeypatch):
     """The scoring service and the statusline must derive the same ID.
 

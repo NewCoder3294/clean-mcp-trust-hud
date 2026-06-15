@@ -698,8 +698,20 @@ class CodebaseIndexer:
 
     @staticmethod
     def _project_id(path: str) -> str:
-        """Generate a project ID from path."""
-        return os.path.basename(path).lower().replace(" ", "_")
+        """Default project ID for *path*, via the shared resolver.
+
+        Delegates to :func:`resolve_local_project_id` — the single source of
+        truth — so an index written with no explicit ``project_id`` is keyed
+        exactly how the scoring/statusline layers look it up (git
+        ``owner/repo``+branch, or ``local/<folder>``). Using the bare basename
+        here meant the daemon's incremental reindex (``indexer.index(root)``)
+        wrote fresh entities to an orphan table the HUD never read, pinning the
+        HUD to a stale index. Callers may still pass an explicit ``project_id``
+        to ``index()`` to override this.
+        """
+        from ..mcp.shared import resolve_local_project_id
+
+        return resolve_local_project_id(path)
 
     @staticmethod
     def _error_result(error: str, path: str) -> dict:
