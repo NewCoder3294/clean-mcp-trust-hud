@@ -232,6 +232,27 @@ call the `score_file` / `score_change` MCP tools directly. Configure via
 
 `clean-ide` — IDE layout: your editor on the left, the trust-colored tree as a docked right sidebar; Enter opens files into the editor (needs tmux).
 
+### Self-healing fixes (`clean-fixes`)
+
+When an edit calls a symbol that doesn't resolve in your **fresh** index — a
+likely *hallucinated call* — clean finds the nearest real symbol in the index
+(stdlib name-similarity; no model, no API) and queues a ready-to-apply fix in a
+per-repo inbox. It runs entirely out-of-band from your editor session; the only
+thing that surfaces in the HUD is a passive `· N fix ready` count on row 3.
+
+```bash
+clean-fixes                 # list pending fixes:  [id] file:line  bad → good
+clean-fixes apply <id>      # apply the suggestion to the file
+clean-fixes apply <id> --pick 1   # pick a different candidate (0-based; default 0)
+clean-fixes reject <id>     # drop a suggestion without applying
+```
+
+Two safety rails: fixes are only proposed against a fresh index (a stale index
+never triggers a rewrite), and `apply` edits a file **only** when the bad symbol
+occurs exactly once as a whole identifier — zero or multiple occurrences are
+reported as stale and skipped. Nothing is ever auto-applied; the inbox is stored
+under `~/.clean/fixes/`.
+
 ## Development
 
 ```bash
