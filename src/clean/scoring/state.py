@@ -7,6 +7,7 @@ so the score is written to a small JSON file that the statusline reads.
 from __future__ import annotations
 
 import json
+import re
 from datetime import datetime
 from pathlib import Path
 
@@ -73,3 +74,45 @@ class ScoringStateWriter:
                 return json.load(fh)
         except (json.JSONDecodeError, OSError):
             return None
+
+
+PER_REPO_DIR = Path.home() / ".clean" / "scoring"
+
+
+def _repo_state_path(project_id: str, base: Path = PER_REPO_DIR) -> Path:
+    """Filesystem-safe per-repo state path. project_ids are already dash-safe,
+    but sanitize defensively so an exotic id can never escape ``base``."""
+    safe = re.sub(r"[^A-Za-z0-9._-]", "_", project_id) or "_"
+    return base / f"{safe}.json"
+
+
+def write_repo_score(
+    score: FileScore, base: Path = PER_REPO_DIR, updated_at: str | None = None
+) -> None:
+    """Persist the last *good* (non-skipped) score for a repo, keyed by project_id.
+
+    Skipped scores (unsupported language, no entities) are ignored so they can
+    never clobber a repo's last good number. Best-effort; never raises.
+    """
+    if score.skipped or not score.project_id:
+        return
+    try:
+        base.mkdir(parents=True, exist_ok=True)
+        with open(_repo_state_path(score.project_id, base), "w") as fh:
+            json.dump(file_score_to_dict(score, updated_at), fh, indent=2)
+    except Exception:
+        pass
+
+
+def read_repo_score(project_id: str, base: Path = PER_REPO_DIR) -> dict | None:
+    """Read a repo's last good score, or None if absent/unreadable."""
+    if not project_id:
+        return None
+    path = _repo_state_path(project_id, base)
+    try:
+        if not path.exists():
+            return None
+        with open(path) as fh:
+            return json.load(fh)
+    except (json.JSONDecodeError, OSError):
+        return None

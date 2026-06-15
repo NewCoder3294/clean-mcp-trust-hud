@@ -1,7 +1,7 @@
 """Tests for the scoring state writer (~/.clean/scoring.json)."""
 
 from clean.scoring.base import FileScore, IndicatorResult, Offender
-from clean.scoring.state import ScoringStateWriter, file_score_to_dict
+from clean.scoring.state import ScoringStateWriter, file_score_to_dict, read_repo_score, write_repo_score
 
 
 def _sample_score() -> FileScore:
@@ -22,6 +22,45 @@ def _sample_score() -> FileScore:
         ],
         entity_count=3,
         stale=False,
+    )
+
+
+def _skipped_score() -> FileScore:
+    return FileScore(
+        project_id="proj",
+        file_path="/tmp/proj/View.swift",
+        overall_score=100,
+        overall_label="OK",
+        indicators=[],
+        entity_count=0,
+        stale=False,
+        skipped=True,
+    )
+
+
+def _no_project_id_score() -> FileScore:
+    score = _sample_score()
+    return FileScore(
+        project_id="",
+        file_path=score.file_path,
+        overall_score=score.overall_score,
+        overall_label=score.overall_label,
+        indicators=score.indicators,
+        entity_count=score.entity_count,
+        stale=score.stale,
+    )
+
+
+def _exotic_id_score() -> FileScore:
+    score = _sample_score()
+    return FileScore(
+        project_id="///",
+        file_path=score.file_path,
+        overall_score=score.overall_score,
+        overall_label=score.overall_label,
+        indicators=score.indicators,
+        entity_count=score.entity_count,
+        stale=score.stale,
     )
 
 
@@ -48,3 +87,38 @@ def test_round_trip(tmp_path):
 def test_read_missing_file_returns_none(tmp_path):
     writer = ScoringStateWriter(tmp_path / "nope.json")
     assert writer.read() is None
+
+
+def test_write_repo_score_round_trips_by_project_id(tmp_path):
+    write_repo_score(_sample_score(), base=tmp_path, updated_at="2026-06-06T00:00:00")
+    data = read_repo_score("proj", base=tmp_path)
+    assert data is not None
+    assert data["overall_score"] == 82
+    assert data["indicators"][0]["offenders"][0]["name"] == "frobnicate"
+
+
+def test_skipped_score_is_not_persisted(tmp_path):
+    write_repo_score(_skipped_score(), base=tmp_path)
+    assert read_repo_score("proj", base=tmp_path) is None
+
+
+def test_skipped_score_does_not_overwrite_last_good(tmp_path):
+    write_repo_score(_sample_score(), base=tmp_path)
+    write_repo_score(_skipped_score(), base=tmp_path)  # must be a no-op
+    data = read_repo_score("proj", base=tmp_path)
+    assert data is not None and data["overall_score"] == 82
+
+
+def test_read_missing_repo_returns_none(tmp_path):
+    assert read_repo_score("nope", base=tmp_path) is None
+
+
+def test_empty_project_id_is_ignored(tmp_path):
+    write_repo_score(_no_project_id_score(), base=tmp_path)
+    assert read_repo_score("", base=tmp_path) is None
+
+
+def test_exotic_project_id_sanitizes_to_safe_filename(tmp_path):
+    write_repo_score(_exotic_id_score(), base=tmp_path, updated_at="2026-06-06T00:00:00")
+    data = read_repo_score("///", base=tmp_path)
+    assert data is not None and data["overall_score"] == 82
