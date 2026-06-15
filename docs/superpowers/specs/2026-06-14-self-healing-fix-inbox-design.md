@@ -120,10 +120,14 @@ repo (resolved via the existing `git_context(os.getcwd()).project_id`, like the 
 - `clean-fixes` (no args) — list pending fixes:
   `[a1b2] foo.py:42  load_index → load_repo_index  (+1 more)`
 - `clean-fixes apply <id> [--pick N]` — apply the chosen candidate (default: the first).
-  **Safe-apply contract:** read the file; confirm the recorded `line` still contains
-  `bad_symbol` as a whole identifier token; if yes, replace that token with the chosen
-  candidate and write the file; if the line changed or the symbol is gone, do **not**
-  edit — report the entry as **stale** and drop it. No fuzzy/whole-file search.
+  **Safe-apply contract:** read the file; the bad symbol must occur **exactly once** in
+  the file as a whole identifier token; if so, replace that single occurrence with the
+  chosen candidate and write the file; if it occurs zero times (gone/already fixed) or
+  more than once (ambiguous), do **not** edit — report the entry as **stale**. No
+  fuzzy matching, no guessing which occurrence. (The grounding offender records the
+  enclosing function's start line, not the exact call line, so a unique whole-file
+  occurrence is the reliable safe target rather than a single recorded line; `line` is
+  kept for display context only.)
 - `clean-fixes reject <id>` — remove the entry.
 
 ### 5. HUD surface
@@ -174,8 +178,14 @@ small module and a stdlib call to find out.
 
 ## Resolved decisions
 
-- **Apply safety:** exact whole-symbol replace on the recorded line, else skip as stale.
-  No fuzzy patching, no auto-apply. Decided 2026-06-14.
+- **Apply safety:** replace the bad symbol only when it occurs exactly once in the file
+  (whole-word); zero or multiple occurrences → skip as stale. No fuzzy patching, no
+  auto-apply. (Refined from "recorded line" after finding the offender line is the
+  entity start, not the call line.) Decided 2026-06-14.
+- **Candidate retrieval:** seed `difflib` from `store.get_by_name_substring` queries on
+  the bad symbol's tokens — reuses the existing store, no new storage/protocol method.
+  Known v1 limit: a run-together symbol sharing no ≥3-char token with the real name may
+  yield no candidates (queues nothing rather than guessing). Decided 2026-06-14.
 - **Candidates:** up to 3 near-matches (`difflib n=3, cutoff=0.6`), first is the default
   on `apply`. Decided 2026-06-14.
 - **Fixer engine:** deterministic stdlib `difflib` over indexed names — no LLM, no API
