@@ -165,7 +165,7 @@ tmp paths).
    Tier 2 (gate writes via PreToolUse + `score_change`, behind `off → warn → block`).
    Separate spec.
 
-## Open decisions
+## Resolved decisions
 
-- **Green-state behavior:** calm one-liner `● OK 96` (recommended) vs. drop row 3 entirely
-  when all-clear (HUD shrinks to 2 rows until something needs attention).
+- **Green-state behavior:** **calm one-liner `● OK 96`** — row 3 stays present when
+  all-clear (no layout jump; reassures the HUD is watching). Decided 2026-06-14.
