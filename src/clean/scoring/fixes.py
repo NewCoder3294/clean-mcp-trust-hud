@@ -13,7 +13,8 @@ import hashlib
 import json
 import re
 from collections.abc import Iterable
-from dataclasses import dataclass
+from dataclasses import asdict, dataclass
+from datetime import datetime
 from pathlib import Path
 
 
@@ -88,3 +89,54 @@ def suggest_candidates(
     seg = bad_symbol.split(".")[-1]
     segs = sorted({nm.split(".")[-1] for nm in names if nm})
     return difflib.get_close_matches(seg, segs, n=n, cutoff=cutoff)
+
+
+def _candidate_names(store, project_id: str, bad_symbol: str, per_token_limit: int = 100) -> list[str]:
+    """Indexed names sharing a >=3-char token with the bad symbol's final segment."""
+    seg = bad_symbol.split(".")[-1]
+    tokens = [t for t in re.split(r"[._]|(?<=[a-z])(?=[A-Z])", seg) if len(t) >= 3] or [seg]
+    names: list[str] = []
+    for tok in tokens:
+        try:
+            names.extend(e.name for e in store.get_by_name_substring(project_id, tok, limit=per_token_limit))
+        except Exception:
+            continue
+    return names
+
+
+def propose_fixes(score, store, base: Path = FIX_INBOX_DIR) -> None:
+    """Queue fixes for high-confidence hallucinated symbols. Best-effort; never raises.
+
+    Trigger: the score is real (not skipped, project indexed) and the grounding
+    indicator is fresh (confidence == 1.0) with offenders. For each offender with
+    a near-match real symbol, write an inbox entry. Re-running for a file replaces
+    that file's entries, so resolved hallucinations are pruned.
+    """
+    try:
+        if score.skipped or not score.indexed or not score.project_id:
+            return
+        grounding = next((i for i in score.indicators if i.key == "grounding"), None)
+        if grounding is None or grounding.confidence < 1.0:
+            return
+        new_entries: list[dict] = []
+        for off in grounding.offenders:
+            cands = suggest_candidates(off.name, _candidate_names(store, score.project_id, off.name))
+            if not cands:
+                continue
+            seg = off.name.split(".")[-1]
+            new_entries.append(
+                asdict(
+                    FixSuggestion(
+                        id=_fix_id(score.file_path, off.name),
+                        file_path=score.file_path,
+                        line=off.line,
+                        bad_symbol=seg,
+                        candidates=cands,
+                        created_at=datetime.now().isoformat(),
+                    )
+                )
+            )
+        kept = [e for e in read_fixes(score.project_id, base) if e.get("file_path") != score.file_path]
+        write_fixes(score.project_id, kept + new_entries, base)
+    except Exception:
+        pass

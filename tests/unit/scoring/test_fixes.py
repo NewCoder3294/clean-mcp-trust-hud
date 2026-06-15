@@ -2,6 +2,86 @@
 
 from clean.scoring.fixes import suggest_candidates
 from clean.scoring.fixes import FixSuggestion, _fix_id, read_fixes, write_fixes
+from clean.scoring.base import FileScore, IndicatorResult, Offender
+from clean.scoring.fixes import propose_fixes
+
+
+class _FakeEntity:
+    def __init__(self, name):
+        self.name = name
+
+
+class _FakeStore:
+    """Returns names containing the queried token (mimics get_by_name_substring)."""
+
+    def __init__(self, names):
+        self._names = names
+
+    def get_by_name_substring(self, project_id, pattern, limit=20):
+        p = pattern.lower()
+        return [_FakeEntity(n) for n in self._names if p in n.lower()][:limit]
+
+
+def _score(offenders=(Offender("load_index", "no match", 42),), confidence=1.0,
+           skipped=False, indexed=True, project_id="proj"):
+    return FileScore(
+        project_id=project_id, file_path="/p/mod.py", overall_score=40,
+        overall_label="RISK",
+        indicators=[IndicatorResult("grounding", "Grounding", 40, "1 unresolved",
+                                    offenders=tuple(offenders), confidence=confidence)],
+        entity_count=3, stale=False, indexed=indexed, skipped=skipped)
+
+
+def test_propose_queues_a_fix_for_high_confidence_hallucination(tmp_path):
+    store = _FakeStore(["load_repo_index", "warm_model"])
+    propose_fixes(_score(), store, base=tmp_path)
+    fixes = read_fixes("proj", base=tmp_path)
+    assert len(fixes) == 1
+    assert fixes[0]["bad_symbol"] == "load_index"
+    assert fixes[0]["candidates"] == ["load_repo_index"]
+
+
+def test_no_fix_when_index_stale(tmp_path):
+    store = _FakeStore(["load_repo_index"])
+    propose_fixes(_score(confidence=0.7), store, base=tmp_path)
+    assert read_fixes("proj", base=tmp_path) == []
+
+
+def test_no_fix_when_skipped(tmp_path):
+    store = _FakeStore(["load_repo_index"])
+    propose_fixes(_score(skipped=True), store, base=tmp_path)
+    assert read_fixes("proj", base=tmp_path) == []
+
+
+def test_no_fix_when_unindexed(tmp_path):
+    store = _FakeStore(["load_repo_index"])
+    propose_fixes(_score(indexed=False), store, base=tmp_path)
+    assert read_fixes("proj", base=tmp_path) == []
+
+
+def test_no_fix_when_no_near_match(tmp_path):
+    store = _FakeStore(["totally_unrelated"])
+    propose_fixes(_score(), store, base=tmp_path)
+    assert read_fixes("proj", base=tmp_path) == []
+
+
+def test_reproposing_same_file_prunes_resolved_offenders(tmp_path):
+    store = _FakeStore(["load_repo_index", "warm_model_fn"])
+    propose_fixes(_score(), store, base=tmp_path)  # queues load_index
+    # Re-score: the hallucination is gone, a different one appears.
+    propose_fixes(_score(offenders=(Offender("warm_model", "no match", 9),)),
+                  store, base=tmp_path)
+    fixes = read_fixes("proj", base=tmp_path)
+    assert len(fixes) == 1 and fixes[0]["bad_symbol"] == "warm_model"
+
+
+def test_resolved_hallucination_clears_inbox(tmp_path):
+    store = _FakeStore(["load_repo_index"])
+    propose_fixes(_score(), store, base=tmp_path)  # queues load_index
+    assert len(read_fixes("proj", base=tmp_path)) == 1
+    # Re-score: grounding is fresh but the hallucination is gone (no offenders).
+    propose_fixes(_score(offenders=()), store, base=tmp_path)
+    assert read_fixes("proj", base=tmp_path) == []
 
 
 def test_suggests_near_miss_real_symbol():
