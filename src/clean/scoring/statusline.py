@@ -286,6 +286,42 @@ def _git_line(git: GitContext, color: bool) -> str:
     return _GROUP_SEP.join(parts)
 
 
+_METRIC_PHRASE = {
+    "blast_radius": "high blast radius",
+    "orphan": "low reuse",
+    "alignment": "off-pattern",
+    "duplication": "near-duplicate",
+}
+
+
+# Pure helper; wired into row 3 by build_clean_row / render in a later task.
+def _select_reason(state: dict) -> str:
+    """The ` · …` suffix for row 3. Grounding offenders win; else the weakest
+    displayed metric as a plain phrase; else empty when everything is healthy."""
+    by_key = {i["key"]: i for i in state.get("indicators", [])}
+    g = by_key.get("grounding")
+    if g and g.get("offenders"):
+        names = [o["name"] for o in g["offenders"]]
+        shown = ", ".join(names[:2])
+        extra = f" +{len(names) - 2}" if len(names) > 2 else ""
+        raw = state.get("overall_score")
+        score = 100 if raw is None else int(raw)
+        if score < 60:
+            return f" · likely hallucinated: {shown}{extra}"
+        n = len(names)
+        return f" · check {n} call{'s' if n != 1 else ''}: {shown}{extra}"
+    candidates = [
+        (int(i["score"]), i["key"])
+        for i in state.get("indicators", [])
+        if i["key"] in _METRIC_PHRASE and not i.get("skipped")
+    ]
+    if candidates:
+        worst_score, worst_key = min(candidates)
+        if worst_score < 85:
+            return f" · {_METRIC_PHRASE[worst_key]}"
+    return ""
+
+
 def _overall_chunk(state: dict, color: bool) -> str:
     overall = int(state.get("overall_score", 100))
     label = state.get("overall_label", "OK")

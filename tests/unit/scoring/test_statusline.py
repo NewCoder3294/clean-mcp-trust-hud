@@ -9,10 +9,16 @@ from clean.scoring.statusline import (
     _ctx_meter,
     _ctx_used_pct,
     _current_task,
+    _select_reason,
     legend,
     render,
     system_context,
 )
+
+
+def _ind(key, score, offenders=()):
+    return {"key": key, "label": key, "score": score, "skipped": False,
+            "offenders": [{"name": n, "detail": "", "line": 1} for n in offenders]}
 
 
 def _state(**over):
@@ -202,3 +208,42 @@ def test_system_context_from_payload(tmp_path, monkeypatch):
     assert sc.model == "Opus 4.8"
     assert sc.ctx_used == 0
     assert sc.task is None
+
+
+# --- reason selector (_select_reason) ----------------------------------------
+
+
+def test_reason_review_names_grounding_calls():
+    state = {"overall_score": 71, "indicators": [_ind("grounding", 50, ["load_index", "warm_model"])]}
+    assert _select_reason(state) == " · check 2 calls: load_index, warm_model"
+
+
+def test_reason_risk_says_likely_hallucinated():
+    state = {"overall_score": 38, "indicators": [_ind("grounding", 20, ["foo"])]}
+    assert _select_reason(state) == " · likely hallucinated: foo"
+
+
+def test_reason_caps_symbol_list_at_two():
+    state = {"overall_score": 71, "indicators": [_ind("grounding", 30, ["a", "b", "c", "d"])]}
+    assert _select_reason(state) == " · check 4 calls: a, b +2"
+
+
+def test_reason_falls_back_to_weakest_metric_phrase():
+    state = {"overall_score": 72, "indicators": [
+        _ind("grounding", 100), _ind("orphan", 40), _ind("alignment", 90)]}
+    assert _select_reason(state) == " · low reuse"
+
+
+def test_reason_empty_when_all_metrics_healthy():
+    state = {"overall_score": 96, "indicators": [_ind("grounding", 100), _ind("orphan", 90)]}
+    assert _select_reason(state) == ""
+
+
+def test_reason_check_singular_call():
+    state = {"overall_score": 71, "indicators": [_ind("grounding", 50, ["single_fn"])]}
+    assert _select_reason(state) == " · check 1 call: single_fn"
+
+
+def test_reason_caps_exactly_three_offenders():
+    state = {"overall_score": 71, "indicators": [_ind("grounding", 30, ["a", "b", "c"])]}
+    assert _select_reason(state) == " · check 3 calls: a, b +1"
