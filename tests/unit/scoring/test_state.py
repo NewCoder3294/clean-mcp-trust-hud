@@ -122,3 +122,22 @@ def test_exotic_project_id_sanitizes_to_safe_filename(tmp_path):
     write_repo_score(_exotic_id_score(), base=tmp_path, updated_at="2026-06-06T00:00:00")
     data = read_repo_score("///", base=tmp_path)
     assert data is not None and data["overall_score"] == 82
+
+
+def test_hook_inline_persists_per_repo(tmp_path, monkeypatch):
+    import clean.scoring.hook as hook
+
+    captured = {}
+    monkeypatch.setattr(hook, "write_repo_score", lambda s, **k: captured.setdefault("score", s))
+
+    class _Scoring:
+        def score_file(self, *a, **k):
+            return _sample_score()
+
+    class _Container:
+        scoring = _Scoring()
+
+    monkeypatch.setattr(hook, "ServiceContainer", lambda: _Container(), raising=False)
+    monkeypatch.setattr(hook.ScoringStateWriter, "write", lambda self, s, **k: None, raising=False)
+    hook._score_inline("/tmp/proj/mod.py", "/tmp/proj")
+    assert captured["score"].project_id == "proj"

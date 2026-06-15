@@ -16,7 +16,9 @@ from __future__ import annotations
 import json
 import sys
 
+from ..services.container import ServiceContainer
 from .daemon import request_score, serve
+from .state import ScoringStateWriter, write_repo_score
 
 
 def _extract_file_path(payload: dict) -> tuple[str | None, str | None]:
@@ -29,12 +31,10 @@ def _extract_file_path(payload: dict) -> tuple[str | None, str | None]:
 
 def _score_inline(file_path: str, cwd: str | None) -> None:
     """Fallback: score without the daemon (no model load, fast indicators)."""
-    from ..services.container import ServiceContainer
-    from .state import ScoringStateWriter
-
     container = ServiceContainer()
     score = container.scoring.score_file(file_path, with_embeddings=False)
     ScoringStateWriter().write(score)
+    write_repo_score(score)
 
 
 def run_hook(stdin_text: str) -> int:
@@ -62,12 +62,10 @@ def main() -> None:
         return
     if argv and argv[0] not in ("hook",):
         # Treat a bare argument as a path to score directly.
-        from ..services.container import ServiceContainer
-        from .state import ScoringStateWriter
-
         container = ServiceContainer()
         score = container.scoring.score_file(argv[0], with_embeddings=True)
         ScoringStateWriter().write(score)
+        write_repo_score(score)
         print(
             json.dumps(
                 {"overall_score": score.overall_score, "label": score.overall_label}

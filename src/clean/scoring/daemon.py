@@ -18,7 +18,7 @@ from pathlib import Path
 from ..services.container import ServiceContainer
 from ..util.logging import get_logger
 from .service import _git_toplevel, _project_id_for
-from .state import ScoringStateWriter, file_score_to_dict
+from .state import ScoringStateWriter, file_score_to_dict, write_repo_score
 
 logger = get_logger(__name__)
 
@@ -51,6 +51,7 @@ def _handle_request(
 
     score = container.scoring.score_file(file_path, with_embeddings=True)
     writer.write(score)
+    write_repo_score(score)
     return file_score_to_dict(score)
 
 
