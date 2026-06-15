@@ -1,9 +1,15 @@
 """Tests for the self-healing fix inbox."""
 
-from clean.scoring.fixes import suggest_candidates
-from clean.scoring.fixes import FixSuggestion, _fix_id, read_fixes, write_fixes
+from clean.scoring.fixes import (
+    FixSuggestion,
+    _fix_id,
+    apply_fix,
+    propose_fixes,
+    read_fixes,
+    suggest_candidates,
+    write_fixes,
+)
 from clean.scoring.base import FileScore, IndicatorResult, Offender
-from clean.scoring.fixes import propose_fixes
 
 
 class _FakeEntity:
@@ -137,3 +143,59 @@ def test_fixsuggestion_dataclass_fields():
     s = FixSuggestion(id="x", file_path="/p/m.py", line=1, bad_symbol="b",
                       candidates=["c"], created_at="t")
     assert s.bad_symbol == "b" and s.candidates == ["c"]
+
+
+def _file_entry(path, bad="load_index", cands=("load_repo_index",)):
+    return {"id": "x", "file_path": str(path), "line": 2, "bad_symbol": bad,
+            "candidates": list(cands), "created_at": "t"}
+
+
+def test_apply_replaces_unique_occurrence(tmp_path):
+    f = tmp_path / "mod.py"
+    f.write_text("def f():\n    return load_index()\n")
+    assert apply_fix(_file_entry(f)) == "applied"
+    assert f.read_text() == "def f():\n    return load_repo_index()\n"
+
+
+def test_apply_is_stale_when_symbol_absent(tmp_path):
+    f = tmp_path / "mod.py"
+    f.write_text("def f():\n    return other()\n")
+    assert apply_fix(_file_entry(f)) == "stale"
+    assert "other()" in f.read_text()  # untouched
+
+
+def test_apply_is_stale_when_ambiguous(tmp_path):
+    f = tmp_path / "mod.py"
+    f.write_text("load_index()\nload_index()\n")  # two occurrences -> never guess
+    assert apply_fix(_file_entry(f)) == "stale"
+    assert f.read_text() == "load_index()\nload_index()\n"
+
+
+def test_apply_does_not_touch_substring_matches(tmp_path):
+    f = tmp_path / "mod.py"
+    f.write_text("x = load_index\ny = load_index_helper\n")  # whole-word only
+    assert apply_fix(_file_entry(f)) == "applied"
+    assert f.read_text() == "x = load_repo_index\ny = load_index_helper\n"
+
+
+def test_apply_pick_selects_candidate(tmp_path):
+    f = tmp_path / "mod.py"
+    f.write_text("load_index()\n")
+    assert apply_fix(_file_entry(f, cands=("a_fn", "load_repo_index")), pick=1) == "applied"
+    assert f.read_text() == "load_repo_index()\n"
+
+
+def test_apply_bad_pick_returns_error(tmp_path):
+    f = tmp_path / "mod.py"
+    f.write_text("load_index()\n")
+    assert apply_fix(_file_entry(f), pick=5) == "error"
+
+
+def test_apply_missing_file_is_stale(tmp_path):
+    assert apply_fix(_file_entry(tmp_path / "nope.py")) == "stale"
+
+
+def test_apply_empty_bad_symbol_returns_error(tmp_path):
+    f = tmp_path / "mod.py"
+    f.write_text("x = foo()\n")
+    assert apply_fix({"file_path": str(f), "bad_symbol": "", "candidates": ["bar"]}) == "error"

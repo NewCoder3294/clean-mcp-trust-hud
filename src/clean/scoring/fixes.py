@@ -11,7 +11,9 @@ from __future__ import annotations
 import difflib
 import hashlib
 import json
+import os
 import re
+import tempfile
 from collections.abc import Iterable
 from dataclasses import asdict, dataclass
 from datetime import datetime
@@ -102,6 +104,51 @@ def _candidate_names(store, project_id: str, bad_symbol: str, per_token_limit: i
         except Exception:
             continue
     return names
+
+
+def apply_fix(entry: dict, pick: int = 0) -> str:
+    """Apply a queued fix. Returns 'applied', 'stale', or 'error'.
+
+    Safe contract: replace the bad symbol only if it occurs **exactly once** in
+    the file as a whole identifier token. Zero or multiple occurrences -> 'stale'
+    (never guess which one). The file is left untouched unless exactly one match.
+    """
+    candidates = entry.get("candidates") or []
+    if not isinstance(pick, int) or pick < 0 or pick >= len(candidates):
+        return "error"
+    replacement = candidates[pick]
+    bad = entry.get("bad_symbol") or ""
+    path = entry.get("file_path") or ""
+    if not bad:
+        return "error"
+    try:
+        with open(path, encoding="utf-8") as fh:
+            src = fh.read()
+    except OSError:
+        return "stale"
+    pattern = re.compile(rf"(?<![A-Za-z0-9_]){re.escape(bad)}(?![A-Za-z0-9_])")
+    if len(pattern.findall(src)) != 1:
+        return "stale"
+    new_src = pattern.sub(replacement, src)  # guard above ensures exactly one match
+    # Atomic write: write a sibling temp file, preserve mode, then os.replace
+    # (atomic on POSIX) — so a crash mid-write can never corrupt the source file.
+    target = Path(path)
+    try:
+        fd, tmp = tempfile.mkstemp(dir=str(target.parent), suffix=".clean-fix.tmp")
+        try:
+            with os.fdopen(fd, "w", encoding="utf-8") as fh:
+                fh.write(new_src)
+            os.chmod(tmp, os.stat(path).st_mode & 0o777)
+            os.replace(tmp, path)
+        except Exception:
+            try:
+                os.unlink(tmp)
+            except OSError:
+                pass
+            raise
+    except OSError:
+        return "error"
+    return "applied"
 
 
 def propose_fixes(score, store, base: Path = FIX_INBOX_DIR) -> None:
