@@ -285,3 +285,21 @@ def test_clean_row_last_good_without_file_path_omits_language_note():
     recent = {"skipped": True, "project_id": "proj", "file_path": None}
     row = build_clean_row(_good(71, "REVIEW", ()), recent, GIT, color=False)
     assert row == "○ 71 REVIEW · last good"
+
+
+def test_clean_row_appends_fix_count(monkeypatch):
+    monkeypatch.setattr(sl, "read_fixes", lambda pid: [{"id": "a"}])
+    row = build_clean_row(_good(38, "RISK", ("load_index",)), None, GIT, color=False)
+    assert row.endswith("· 1 fix ready")
+
+
+def test_clean_row_pluralizes_fix_count(monkeypatch):
+    monkeypatch.setattr(sl, "read_fixes", lambda pid: [{"id": "a"}, {"id": "b"}])
+    row = build_clean_row(_good(38, "RISK", ("load_index",)), None, GIT, color=False)
+    assert row.endswith("· 2 fixes ready")
+
+
+def test_clean_row_no_fix_suffix_when_none(monkeypatch):
+    monkeypatch.setattr(sl, "read_fixes", lambda pid: [])
+    row = build_clean_row(_good(96, "OK", ()), None, GIT, color=False)
+    assert "fix ready" not in row and "fixes ready" not in row

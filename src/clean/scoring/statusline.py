@@ -35,6 +35,7 @@ import sys
 from typing import NamedTuple
 
 from ..mcp.shared import resolve_local_project_id
+from .fixes import read_fixes
 from .state import ScoringStateWriter, read_repo_score
 
 _RESET = "\033[0m"
@@ -385,7 +386,12 @@ def build_clean_row(
         dot = _paint("●", c + _BOLD, color)
         verdict = _paint(f"{label} {score}", c + _BOLD, color)
         reason = _select_reason(repo_state)
-        return f"{dot} {verdict}{_paint(reason, _DIM, color)}"
+        fixes = read_fixes(git.project_id) if git.project_id else []
+        fix_suffix = ""
+        if fixes:
+            n = len(fixes)
+            fix_suffix = f" · {n} fix{'es' if n != 1 else ''} ready"
+        return f"{dot} {verdict}{_paint(reason, _DIM, color)}{_paint(fix_suffix, _DIM, color)}"
 
     if repo_state is not None or _project_indexed(git.project_id):
         return _paint("clean · edit a Py/JS/TS file to score", _DIM, color)
