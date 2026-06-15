@@ -135,9 +135,11 @@ def test_hook_inline_persists_per_repo(tmp_path, monkeypatch):
             return _sample_score()
 
     class _Container:
+        store = None  # propose_fixes is patched to a no-op; value unused
         scoring = _Scoring()
 
     monkeypatch.setattr(hook, "ServiceContainer", lambda: _Container(), raising=False)
     monkeypatch.setattr(hook.ScoringStateWriter, "write", lambda self, s, **k: None, raising=False)
+    monkeypatch.setattr(hook, "propose_fixes", lambda *a, **k: None, raising=False)
     hook._score_inline("/tmp/proj/mod.py", "/tmp/proj")
     assert captured["score"].project_id == "proj"

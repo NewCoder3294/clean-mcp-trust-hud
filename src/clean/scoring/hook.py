@@ -18,6 +18,7 @@ import sys
 
 from ..services.container import ServiceContainer
 from .daemon import request_score, serve
+from .fixes import propose_fixes
 from .state import ScoringStateWriter, write_repo_score
 
 
@@ -35,6 +36,7 @@ def _score_inline(file_path: str, cwd: str | None) -> None:
     score = container.scoring.score_file(file_path, with_embeddings=False)
     ScoringStateWriter().write(score)
     write_repo_score(score)
+    propose_fixes(score, container.store)
 
 
 def run_hook(stdin_text: str) -> int:
@@ -66,6 +68,7 @@ def main() -> None:
         score = container.scoring.score_file(argv[0], with_embeddings=True)
         ScoringStateWriter().write(score)
         write_repo_score(score)
+        propose_fixes(score, container.store)
         print(
             json.dumps(
                 {"overall_score": score.overall_score, "label": score.overall_label}

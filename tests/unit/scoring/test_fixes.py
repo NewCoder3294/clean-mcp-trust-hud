@@ -255,3 +255,91 @@ def test_cli_bad_args_prints_usage(tmp_path, monkeypatch, capsys):
     monkeypatch.setattr("sys.argv", ["clean-fixes", "bogus"])
     fixes_mod.main()
     assert "usage: clean-fixes" in capsys.readouterr().out
+
+
+def test_hook_inline_calls_propose_fixes(monkeypatch):
+    import clean.scoring.hook as hook
+
+    captured = {}
+    monkeypatch.setattr(hook, "propose_fixes", lambda score, store, **k: captured.setdefault("args", (score, store)))
+    monkeypatch.setattr(hook, "write_repo_score", lambda s, **k: None)
+    monkeypatch.setattr(hook.ScoringStateWriter, "write", lambda self, s, **k: None, raising=False)
+
+    sc = _score()
+
+    class _Store:
+        pass
+
+    class _Scoring:
+        def score_file(self, *a, **k):
+            return sc
+
+    class _Container:
+        store = _Store()
+        scoring = _Scoring()
+
+    c = _Container()
+    monkeypatch.setattr(hook, "ServiceContainer", lambda: c, raising=False)
+    hook._score_inline("/p/mod.py", "/p")
+    assert captured["args"][0] is sc
+    assert captured["args"][1] is c.store
+
+
+def test_daemon_handler_calls_propose_fixes(monkeypatch):
+    import clean.scoring.daemon as daemon
+
+    captured = {}
+    monkeypatch.setattr(daemon, "propose_fixes", lambda score, store, **k: captured.setdefault("args", (score, store)))
+    monkeypatch.setattr(daemon, "write_repo_score", lambda s, **k: None)
+
+    sc = _score()
+
+    class _Store:
+        def count(self, pid):
+            return 0  # skip the incremental reindex branch
+
+    class _Scoring:
+        def score_file(self, *a, **k):
+            return sc
+
+    class _Container:
+        store = _Store()
+        scoring = _Scoring()
+
+    class _Writer:
+        def write(self, s, **k):
+            pass
+
+    c = _Container()
+    daemon._handle_request({"file_path": "/p/mod.py"}, c, _Writer())
+    assert captured["args"][0] is sc
+    assert captured["args"][1] is c.store
+
+
+def test_hook_main_direct_path_calls_propose_fixes(monkeypatch):
+    import clean.scoring.hook as hook
+
+    captured = {}
+    monkeypatch.setattr(hook, "propose_fixes", lambda score, store, **k: captured.setdefault("args", (score, store)))
+    monkeypatch.setattr(hook, "write_repo_score", lambda s, **k: None)
+    monkeypatch.setattr(hook.ScoringStateWriter, "write", lambda self, s, **k: None, raising=False)
+
+    sc = _score()
+
+    class _Store:
+        pass
+
+    class _Scoring:
+        def score_file(self, *a, **k):
+            return sc
+
+    class _Container:
+        store = _Store()
+        scoring = _Scoring()
+
+    c = _Container()
+    monkeypatch.setattr(hook, "ServiceContainer", lambda: c, raising=False)
+    monkeypatch.setattr("sys.argv", ["clean-score", "/p/mod.py"])
+    hook.main()
+    assert captured["args"][0] is sc
+    assert captured["args"][1] is c.store
