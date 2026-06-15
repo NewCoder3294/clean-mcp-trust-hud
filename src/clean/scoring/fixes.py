@@ -13,6 +13,7 @@ import hashlib
 import json
 import os
 import re
+import sys
 import tempfile
 from collections.abc import Iterable
 from dataclasses import asdict, dataclass
@@ -149,6 +150,68 @@ def apply_fix(entry: dict, pick: int = 0) -> str:
     except OSError:
         return "error"
     return "applied"
+
+
+def _current_project_id() -> str | None:
+    """project_id for the directory clean-fixes was run in."""
+    from .statusline import git_context
+
+    return git_context(os.getcwd()).project_id
+
+
+def _print_list(entries: list[dict]) -> None:
+    if not entries:
+        print("No pending fixes.")
+        return
+    for e in entries:
+        cands = e.get("candidates") or []
+        best = cands[0] if cands else "?"
+        more = f"  (+{len(cands) - 1} more)" if len(cands) > 1 else ""
+        loc = f"{os.path.basename(e.get('file_path', '?'))}:{e.get('line', '?')}"
+        print(f"[{e.get('id')}] {loc}  {e.get('bad_symbol')} → {best}{more}")
+
+
+def main() -> None:
+    base = FIX_INBOX_DIR
+    argv = sys.argv[1:]
+    pid = _current_project_id()
+    entries = read_fixes(pid, base) if pid else []
+
+    if not argv:
+        _print_list(entries)
+        return
+
+    cmd = argv[0]
+    if cmd not in ("apply", "reject") or len(argv) < 2:
+        print("usage: clean-fixes [apply <id> [--pick N] | reject <id>]")
+        return
+
+    fix_id = argv[1]
+    match = next((e for e in entries if e.get("id") == fix_id), None)
+    if match is None:
+        print(f"No pending fix with id {fix_id}.")
+        return
+
+    if cmd == "reject":
+        write_fixes(pid, [e for e in entries if e.get("id") != fix_id], base)
+        print(f"Rejected {fix_id}.")
+        return
+
+    pick = 0
+    if "--pick" in argv:
+        try:
+            pick = int(argv[argv.index("--pick") + 1])
+        except (ValueError, IndexError):
+            pick = 0
+    result = apply_fix(match, pick=pick)
+    if result == "applied":
+        write_fixes(pid, [e for e in entries if e.get("id") != fix_id], base)
+        print(f"Applied {fix_id}: {match.get('bad_symbol')} → {match['candidates'][pick]}")
+    elif result == "stale":
+        write_fixes(pid, [e for e in entries if e.get("id") != fix_id], base)
+        print(f"Skipped {fix_id} (stale: the symbol is gone or appears more than once).")
+    else:
+        print(f"Could not apply {fix_id} (bad --pick index).")
 
 
 def propose_fixes(score, store, base: Path = FIX_INBOX_DIR) -> None:

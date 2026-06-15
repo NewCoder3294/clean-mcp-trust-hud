@@ -1,5 +1,6 @@
 """Tests for the self-healing fix inbox."""
 
+import clean.scoring.fixes as fixes_mod
 from clean.scoring.fixes import (
     FixSuggestion,
     _fix_id,
@@ -199,3 +200,58 @@ def test_apply_empty_bad_symbol_returns_error(tmp_path):
     f = tmp_path / "mod.py"
     f.write_text("x = foo()\n")
     assert apply_fix({"file_path": str(f), "bad_symbol": "", "candidates": ["bar"]}) == "error"
+
+
+def test_cli_lists_pending_fixes(tmp_path, monkeypatch, capsys):
+    monkeypatch.setattr(fixes_mod, "FIX_INBOX_DIR", tmp_path)
+    monkeypatch.setattr(fixes_mod, "_current_project_id", lambda: "proj")
+    write_fixes("proj", [_entry()], base=tmp_path)
+    monkeypatch.setattr("sys.argv", ["clean-fixes"])
+    fixes_mod.main()
+    out = capsys.readouterr().out
+    assert "load_index → load_repo_index" in out
+
+
+def test_cli_apply_removes_entry_on_success(tmp_path, monkeypatch, capsys):
+    monkeypatch.setattr(fixes_mod, "FIX_INBOX_DIR", tmp_path)
+    monkeypatch.setattr(fixes_mod, "_current_project_id", lambda: "proj")
+    f = tmp_path / "mod.py"
+    f.write_text("load_index()\n")
+    entry = {"id": "abc123", "file_path": str(f), "line": 1, "bad_symbol": "load_index",
+             "candidates": ["load_repo_index"], "created_at": "t"}
+    write_fixes("proj", [entry], base=tmp_path)
+    monkeypatch.setattr("sys.argv", ["clean-fixes", "apply", "abc123"])
+    fixes_mod.main()
+    assert "applied" in capsys.readouterr().out.lower()
+    assert read_fixes("proj", base=tmp_path) == []
+    assert f.read_text() == "load_repo_index()\n"
+
+
+def test_cli_reject_removes_entry(tmp_path, monkeypatch, capsys):
+    monkeypatch.setattr(fixes_mod, "FIX_INBOX_DIR", tmp_path)
+    monkeypatch.setattr(fixes_mod, "_current_project_id", lambda: "proj")
+    entry = {"id": "abc123", "file_path": "/p/m.py", "line": 1, "bad_symbol": "x",
+             "candidates": ["y"], "created_at": "t"}
+    write_fixes("proj", [entry], base=tmp_path)
+    monkeypatch.setattr("sys.argv", ["clean-fixes", "reject", "abc123"])
+    fixes_mod.main()
+    assert read_fixes("proj", base=tmp_path) == []
+
+
+def test_cli_unknown_id_reports_not_found(tmp_path, monkeypatch, capsys):
+    monkeypatch.setattr(fixes_mod, "FIX_INBOX_DIR", tmp_path)
+    monkeypatch.setattr(fixes_mod, "_current_project_id", lambda: "proj")
+    write_fixes("proj", [_entry()], base=tmp_path)
+    monkeypatch.setattr("sys.argv", ["clean-fixes", "apply", "nope"])
+    fixes_mod.main()
+    out = capsys.readouterr().out
+    assert "No pending fix" in out
+    assert read_fixes("proj", base=tmp_path) != []  # nothing removed
+
+
+def test_cli_bad_args_prints_usage(tmp_path, monkeypatch, capsys):
+    monkeypatch.setattr(fixes_mod, "FIX_INBOX_DIR", tmp_path)
+    monkeypatch.setattr(fixes_mod, "_current_project_id", lambda: "proj")
+    monkeypatch.setattr("sys.argv", ["clean-fixes", "bogus"])
+    fixes_mod.main()
+    assert "usage: clean-fixes" in capsys.readouterr().out
